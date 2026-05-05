@@ -1,0 +1,20 @@
+name: victron
+
+services:
+  mosquitto:
+    environment:
+      - MQTT_ESP32_PASS=test_esp32_pass
+      - MQTT_DECODER_PASS=test_decoder_pass
+    ports:
+      - "1883:1883"
+
+  ble-decoder:
+    volumes:
+      - ./decoder/fixtures/devices_fixture.json:/app/devices.json:ro
+    environment:
+      - MQTT_PASSWORD=test_decoder_pass
+      - INFLUX_BUCKET=victron_test
+
+  solar-api:
+    environment:
+      - INFLUX_BUCKET=victron_test

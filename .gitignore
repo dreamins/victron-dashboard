@@ -1,0 +1,13 @@
+esp32/secrets.yaml
+esp32/.esphome/
+esp32/build/
+config/devices.json
+mosquitto/passwd
+certs/
+.env
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/

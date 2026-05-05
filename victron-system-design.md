@@ -1,0 +1,949 @@
+# Victron Solar Monitor — System Design
+
+**Version:** 4.3
+**Status:** Design — pending build
+
+---
+
+## 1. What This System Does
+
+Three Victron BLE devices broadcast their state continuously over Bluetooth. A wall-mounted ESP32 running **ESPHome firmware** listens passively — no pairing, no connection — and relays every Victron advertisement packet over WiFi to a message broker on the local Linux server. A decoder service picks those packets up, decrypts and parses them, timestamps them on receipt, and writes structured time-series data into a database. A web application reads from that database and serves a dashboard. The dashboard is gated behind Google OAuth so that only one specific Google account can access it, and it is reachable over the internet on a non-standard HTTPS port to reduce scanner noise.
+
+No cloud dependency. No Victron servers involved. The devices never know anything other than that they are broadcasting.
+
+---
+
+## 2. Components and Responsibilities
+
+### 2.1 victron-bridge (ESP32 running ESPHome)
+
+**Responsibility:** Passive BLE advertisement capture and MQTT relay.
+
+ESPHome is the firmware that runs on the ESP32 microcontroller. It is a YAML-driven framework that compiles into C++ firmware and is flashed directly onto the ESP32 chip. ESPHome is chosen because it provides OTA firmware updates over WiFi, automatic WiFi reconnection with captive portal fallback, remote logging, and a local web status page — all configured in YAML with no C++ required.
+
+**ESP32 dual-core configuration:** The ESP32 used here is a dual-core chip (Xtensa LX6, two cores). ESPHome defaults to the Arduino framework, which treats both cores as a single execution context. The `esp-idf` framework (Espressif's native RTOS-based framework) provides proper SMP scheduling — Core 0 handles the low-level WiFi and Bluetooth protocol stacks, Core 1 handles application code and ESPHome component logic. This is the recommended configuration for any workload that runs BLE and WiFi simultaneously.
+
+```yaml
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf  # Native RTOS framework — proper SMP scheduling for dual-core
+```
+
+The firmware does one thing: it scans for BLE advertisements matching Victron's company identifier (0x02E1) and publishes the raw manufacturer data bytes, plus the source MAC address, to the MQTT broker via an authenticated connection. It does not decrypt, interpret, or filter beyond the company ID.
+
+**Physical placement:** The ESP32 must be physically close to the Victron devices — within BLE range (~10 m, line of sight preferred). It does NOT need to be near the Linux server. The ESP32 is flashed via USB once (from any laptop), then carried to and installed near the Victrons. All future firmware updates are OTA over WiFi.
+
+**Radio resource contention:** Despite having two CPU cores, the ESP32 has only one physical 2.4 GHz antenna and one radio transceiver. BLE and WiFi share this single hardware resource and must time-slice access to it. This is a physical constraint that dual cores do not change — Core 0 can run the WiFi protocol stack while Core 1 runs BLE scanning code, but both ultimately contend for the same antenna at the RF layer. Continuous BLE scanning while maintaining a constant MQTT stream can starve the WiFi stack and cause disconnects regardless of how many cores the chip has.
+
+The BLE tracker is configured with a 50% duty cycle scan to give the WiFi stack regular guaranteed airtime:
+
+```yaml
+esp32_ble_tracker:
+  scan_parameters:
+    duration: 10s        # Active scan window
+    interval: 320ms      # One scan slot every 320 ms
+    window: 160ms        # Scan for 160 ms per slot — 50% duty cycle
+    active: false        # Passive only — never send scan requests
+```
+
+This prevents WiFi packet loss without meaningfully reducing the Victron advertisement capture rate (Victron devices broadcast every ~1 s, well within the 320 ms interval).
+
+**WiFi RSSI diagnostic sensor:** ESPHome's built-in WiFi signal sensor reports RSSI (signal strength in dBm) to the dashboard every 60 seconds. This makes it straightforward to diagnose poor placement — if the ESP32 starts dropping MQTT messages, RSSI gives an immediate hint about whether it's a WiFi range problem vs. a MQTT broker problem.
+
+```yaml
+sensor:
+  - platform: wifi_signal
+    name: "Bridge WiFi Signal"
+    update_interval: 60s
+```
+
+The RSSI value is surfaced on the dashboard System tab and in the `/health` endpoint response.
+
+**Timestamping:** The ESP32 does NOT include a trusted timestamp in payloads. ESP32 internal clocks drift significantly without a hardware RTC, and SNTP sync fails if WiFi is lost. Timestamps are authoritative only when assigned server-side by the ble-decoder upon receipt. The ESP32 payload includes only the MAC address and raw advertisement bytes.
+
+**MQTT authentication:** The ESP32 connects to Mosquitto using a username and password generated by `setup.sh` during Phase 1. These credentials are written to `esp32/secrets.yaml` (gitignored) and to the Mosquitto password file.
+
+**Publishes to:** `victron/raw` MQTT topic (authenticated)
+**Payload per advertisement:** MAC address + raw manufacturer data as hex string (no timestamp)
+**Scan mode:** Passive, 50% duty cycle
+**Expected throughput:** ~3 MQTT messages/second (one per device)
+
+### 2.2 mosquitto (MQTT Broker)
+
+**Responsibility:** Message bus between victron-bridge and the decoder.
+
+Mosquitto binds only to the server's LAN IP address — not 0.0.0.0. Anonymous connections are disabled. The ESP32 authenticates with a randomly generated username and password created by `setup.sh`. The ble-decoder authenticates with a separate generated credential. These are the only two allowed clients.
+
+Even though Mosquitto is LAN-only, requiring credentials provides defense in depth: any other device on the LAN (laptop, phone, IoT device) that attempts to connect is rejected rather than silently accepted.
+
+```
+listener 1883
+allow_anonymous false
+password_file /mosquitto/config/passwd
+```
+
+`setup.sh` generates the password file automatically during Phase 2. No manual configuration of credentials is required.
+
+**Listens on:** LAN IP only, port 1883
+**Topic structure:** `victron/raw` (all devices, single topic, MAC in payload)
+**Persistence:** Disabled (clean session)
+**Auth:** Username/password required; two accounts (esp32-bridge, decoder)
+
+### 2.3 ble-decoder (Python service)
+
+**Responsibility:** Subscribe to raw advertisement data, decrypt and parse it using the `victron-ble` library, apply a server-side timestamp on receipt, write structured readings to InfluxDB with retry logic.
+
+**Timestamping authority:** The decoder timestamps every reading at the moment the MQTT message is received by the server. This is the authoritative timestamp stored in InfluxDB. The ESP32 payload contains no timestamp. This ensures timeseries consistency regardless of ESP32 clock drift or SNTP failures.
+
+**InfluxDB write retry:** The decoder does not drop data silently on InfluxDB write failures. It implements an exponential-backoff retry with a small in-memory buffer (configurable, default 500 readings ≈ ~2.5 minutes of data at 3 msg/s). If the buffer fills, the oldest readings are evicted (they are replaced by newer data anyway). This protects against InfluxDB restarts, brief overload, or brief network hiccups inside Docker.
+
+```python
+# Conceptual retry logic
+async def write_with_retry(point, max_retries=5, base_delay=1.0):
+    for attempt in range(max_retries):
+        try:
+            await influx_client.write(point)
+            return
+        except InfluxDBError as e:
+            if attempt == max_retries - 1:
+                buffer.evict_oldest_and_append(point)
+            await asyncio.sleep(base_delay * (2 ** attempt))
+```
+
+**Discovery mode:** If a device has no key configured in `devices.json`, the decoder logs the detected device type and MAC without crashing. This is used during Phase 3 setup before keys are collected.
+
+A helper script, `discover.py`, runs during setup. It listens to `victron/raw` and prints each unique MAC, the detected Victron device type, the BLE-advertised name, and a suggested ID using the last 4 hex digits of the MAC as a suffix. This handles the common case of two identical MPPTs that have not been custom-named in the Victron app — they will both show "SmartSolar MPPT 75|10" but their suggested IDs will differ by MAC suffix.
+
+```
+Found: SmartSolar MPPT 75|10 | MAC: AA:BB:CC:DD:EE:01 | Suggested ID: smartsolar_ee01
+Found: SmartSolar MPPT 75|10 | MAC: AA:BB:CC:DD:EE:02 | Suggested ID: smartsolar_ee02
+Found: Smart Battery Sense    | MAC: AA:BB:CC:DD:EE:03 | Suggested ID: battery_sense_ee03
+```
+
+**Subscribes to:** `victron/raw` (authenticated)
+**Writes to:** InfluxDB, measurement `solar`, timestamp = server receipt time
+**Device config:** Mounted JSON file (mac → label + encryption key)
+**Write resilience:** Exponential-backoff retry with 500-reading in-memory buffer
+
+### 2.4 influxdb (InfluxDB 2.x)
+
+**Responsibility:** Time-series storage with correct field-specific downsampling.
+
+Four buckets are configured:
+- **victron** (raw): 30 days, native ~1s resolution.
+- **victron_medium**: 1 year, 5-minute aggregates.
+- **victron_hourly**: 10 years, 1-hour aggregates.
+- **victron_test**: 1-day retention, for isolated testing only — auto-expires, never shown in UI.
+
+**Field-specific downsampling:** Not all fields should use the same aggregate function. `yield_today` and `yield_total` are cumulative counters — taking a `mean()` produces mathematically incorrect results. Instantaneous measurements (power, voltage, current) use `mean()`. Cumulative counters use `max()`.
+
+Two separate Flux downsampling tasks per bucket level:
+
+```flux
+// Task: downsample instantaneous fields to 5-minute means
+option task = {name: "downsample_instant_5m", every: 5m}
+from(bucket: "victron")
+  |> range(start: -10m)
+  |> filter(fn: (r) => r._field != "yield_today" and r._field != "yield_total")
+  |> aggregateWindow(every: 5m, fn: mean, createEmpty: false)
+  |> to(bucket: "victron_medium")
+
+// Task: downsample cumulative counters to 5-minute max
+option task = {name: "downsample_yield_5m", every: 5m}
+from(bucket: "victron")
+  |> range(start: -10m)
+  |> filter(fn: (r) => r._field == "yield_today" or r._field == "yield_total")
+  |> aggregateWindow(every: 5m, fn: max, createEmpty: false)
+  |> to(bucket: "victron_medium")
+```
+
+Identical pair of tasks for the 1-hour `victron_hourly` level.
+
+**Timezone-aware yield aggregation:** Victron devices reset `yield_today` at midnight local device time. InfluxDB tasks run in UTC. The `/api/v1/daily` endpoint applies a UTC offset (configured as `TZ_OFFSET_HOURS` env var on the API container, e.g. `+3` for Moscow) when grouping `yield_today` into calendar days. This prevents daily bars from appearing split across UTC midnight when the user's local midnight differs.
+
+**Port:** 8086 (Docker-internal only, not bound to host)
+**Org:** `home`
+
+### 2.5 solar-api (FastAPI)
+
+**Responsibility:** Serve the dashboard HTML and provide a JSON REST API over which the dashboard fetches data from InfluxDB.
+
+**Bucket stitching for resolution continuity:** When a long time range is requested (e.g. "last 30 days"), a naive implementation returns 5-minute averages for the entire range — including the last hour, which has 1-second data available. This causes a "resolution jump" that makes live data look as sluggish as historical data. The API stitches buckets to always deliver maximum resolution for the most recent data:
+
+- For ranges ≤ 7 days: raw `victron` bucket only.
+- For ranges > 7 days: `victron_medium` from `start` to `-1h`, unioned with raw `victron` from `-1h` to now.
+- For ranges > 1 year: `victron_hourly` from `start` to `-7d`, unioned with `victron_medium` from `-7d` to `-1h`, unioned with raw `victron` from `-1h` to now.
+
+This means charts always show live 1-second resolution for the most recent hour, regardless of the selected time range.
+
+The response includes a `buckets_used` field listing which buckets contributed data, useful for debugging.
+
+**Port:** 8080 (Docker-internal only, not bound to host)
+**Auth:** None at this layer — enforced upstream by oauth2-proxy.
+
+### 2.6 oauth2-proxy
+
+**Responsibility:** Enforce Google OAuth authentication.
+
+oauth2-proxy sits in front of solar-api. Every request must pass through it. It checks for a valid signed session cookie. If absent, it redirects to Google's OAuth flow. If the authenticated email matches `***REDACTED***@gmail.com`, it sets a session cookie and proxies through. Any other email returns 403.
+
+**X-Forwarded-Port handling:** The dashboard is served on the non-standard external port 8443. Google's OAuth redirect URI must include this port explicitly (e.g. `https://solar.yourdomain.com:8443/oauth2/callback`). Nginx is configured to set `X-Forwarded-Port: 8443` on all proxied requests so that oauth2-proxy constructs the correct redirect URI. Without this, Google rejects the callback with a `redirect_uri_mismatch` error.
+
+```nginx
+proxy_set_header X-Forwarded-Port 8443;
+proxy_set_header X-Forwarded-Proto https;
+```
+
+The Google Cloud Console OAuth credential must have `https://solar.yourdomain.com:8443/oauth2/callback` listed as an authorised redirect URI. `setup.sh` prints this exact string for the user to paste.
+
+**Port:** 4180 (Docker-internal only)
+**Session cookie:** Secure, HttpOnly, SameSite=Strict, 24-hour expiry
+**Whitelist:** Single file, single email
+
+### 2.7 nginx (Reverse Proxy + TLS)
+
+**Responsibility:** TLS termination, port exposure, HTTP to HTTPS redirect, security headers, correct forwarding headers for oauth2-proxy.
+
+The server already runs Apache on ports 80 and 443. Nginx runs inside Docker, binding to host ports **8443** (HTTPS) and **8080** (HTTP redirect) only. Apache is left completely undisturbed.
+
+The Let's Encrypt certificate is obtained using the **DNS-01 challenge** — no port 80 dependency.
+
+**Host port (HTTPS):** 8443
+**Host port (HTTP redirect):** 8080
+**External port (router):** 8443 → server LAN IP:8443
+**TLS:** Let's Encrypt via DNS-01, auto-renewed by certbot systemd timer
+**Proxies to:** oauth2-proxy:4180
+**Forwarding headers:** `X-Forwarded-Port: 8443`, `X-Forwarded-Proto: https`
+
+---
+
+## 3. Deployment Architecture
+
+### 3.1 Docker Stack Overview
+
+All server-side components run as a single Docker Compose stack named `victron` at `~/victron/docker-compose.yml`.
+
+| Container | Image | Host ports | Internal port | Role |
+|---|---|---|---|---|
+| nginx | nginx:alpine | 8443, 8080 | 443, 80 | TLS termination, reverse proxy |
+| oauth2-proxy | quay.io/oauth2-proxy/oauth2-proxy | — | 4180 | Google auth gate |
+| solar-api | ./api (custom) | — | 8080 | FastAPI app + static dashboard |
+| influxdb | influxdb:2.7 | — | 8086 | Time-series database |
+| ble-decoder | ./decoder (custom) | — | — | Victron BLE decoder, MQTT consumer |
+| mosquitto | eclipse-mosquitto | 1883 (LAN only) | 1883 | MQTT broker |
+
+### 3.2 Volume Inventory
+
+| Volume name | Mounted into | Purpose |
+|---|---|---|
+| `influxdb-data` | influxdb:/var/lib/influxdb2 | All time-series data |
+| `influxdb-config` | influxdb:/etc/influxdb2 | InfluxDB configuration |
+| `certs` | nginx:/etc/letsencrypt | TLS certificates |
+| `./config/devices.json` | ble-decoder:/app/devices.json | Device labels, MACs, encryption keys |
+| `./config/allowed_emails` | oauth2-proxy:/etc/allowed_emails | Email whitelist |
+| `./mosquitto/mosquitto.conf` | mosquitto:/mosquitto/config/mosquitto.conf | Broker config |
+| `./mosquitto/passwd` | mosquitto:/mosquitto/config/passwd | MQTT credentials (generated by setup.sh) |
+| `./nginx/nginx.conf` | nginx:/etc/nginx/nginx.conf | Nginx config |
+
+### 3.3 Git Repository Structure
+
+```
+victron/
+├── .gitignore                      # Excludes: secrets.yaml, devices.json, certs/, mosquitto/passwd
+├── docker-compose.yml
+├── docker-compose.test.yml
+├── setup.sh
+├── esp32/
+│   ├── victron-bridge.yaml
+│   └── secrets.yaml.example
+├── decoder/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── decoder.py
+│   ├── discover.py
+│   ├── replay.py
+│   └── fixtures/
+│       ├── victron_sample.jsonl
+│       └── devices_fixture.json
+├── api/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── main.py
+│   ├── seed_test_data.py
+│   ├── tests/
+│   │   └── test_endpoints.py
+│   └── static/
+│       └── index.html
+├── nginx/
+│   └── nginx.conf
+├── mosquitto/
+│   └── mosquitto.conf              # passwd file is gitignored — generated by setup.sh
+└── config/
+    ├── devices.json.example
+    └── allowed_emails
+```
+
+### 3.4 Server IP Stability Requirement
+
+`setup.sh` auto-detects the server's LAN IP and writes it into the ESP32 firmware config and the Mosquitto bind address. **This IP must be stable.** If the router assigns a new IP to the server on reboot, the ESP32 will fail to connect to MQTT and the system stops working.
+
+Before Phase 1, `setup.sh` checks whether the detected IP has a DHCP reservation by querying the router's ARP table, and warns if it cannot confirm one. The user is instructed to set a DHCP reservation (or static IP) on the server's MAC address in their router before proceeding. This is a one-time configuration step with explicit instructions provided by `setup.sh`.
+
+---
+
+## 4. Port Topology
+
+Apache occupies ports 80 and 443. This stack does not touch those ports.
+
+```
+INTERNET
+  |
+  | :8443 (HTTPS) <- router forwards external 8443 to server LAN IP:8443
+  |
+  v
++--------------------------------------------------------------+
+|  SERVER HOST                                                  |
+|  :80, :443  <- Apache (existing, untouched)                   |
+|  :8443      <- nginx/Docker (TLS, victron stack)              |
+|  :8080      <- nginx/Docker (HTTP -> HTTPS redirect only)     |
+|  :1883      <- mosquitto (LAN IP only, auth required)         |
+|                                                               |
+|  +---- Docker internal network (victron-net) --------------+  |
+|  |  nginx:443 -> oauth2-proxy:4180 -> solar-api:8080       |  |
+|  |  ble-decoder -> influxdb:8086                           |  |
+|  |  solar-api   -> influxdb:8086                           |  |
+|  |  ble-decoder -> mosquitto:1883 (authenticated)          |  |
+|  |  mosquitto:1883 also on host LAN interface               |  |
+|  +---------------------------------------------------------+  |
++--------------------------------------------------------------+
+  |
+  | :1883 (LAN only, authenticated)
+  v
+ESP32 (victron-bridge) -- near Victrons, anywhere on WiFi LAN
+```
+
+---
+
+## 5. Data Model
+
+All data lives in InfluxDB, measurement `solar`. Timestamps are assigned server-side by the decoder on receipt — never by the ESP32.
+
+### Tags
+
+| Tag | Values | Purpose |
+|---|---|---|
+| `device` | `mppt1`, `mppt2`, `battery_sense` | Which physical device |
+| `label` | e.g. "MPPT North" | Human display name — auto-read from BLE advertisement, confirmed by user |
+
+### Fields (per MPPT 75/10)
+
+| Field | Type | Unit | Aggregate | Notes |
+|---|---|---|---|---|
+| `pv_power` | float | W | mean | Solar panel power |
+| `pv_voltage` | float | V | mean | Solar panel voltage |
+| `battery_voltage` | float | V | mean | Battery terminal voltage |
+| `charge_current` | float | A | mean | Charging current into battery |
+| `load_current` | float | A | mean | Load output current |
+| `load_power` | float | W | mean | Load output power |
+| `load_state` | int | bool | max | 1 = load ON, 0 = OFF |
+| `charge_state` | int | enum | max | 0=Off 3=Bulk 4=Absorption 5=Float 7=Equalize |
+| `yield_today` | float | Wh | **max** | Cumulative counter — mean is mathematically incorrect |
+| `yield_total` | float | kWh | **max** | Cumulative counter — mean is mathematically incorrect |
+| `error_code` | int | — | max | 0 = no fault |
+
+### Fields (Battery Sense)
+
+| Field | Type | Unit | Aggregate |
+|---|---|---|---|
+| `battery_voltage` | float | V | mean |
+| `temperature` | float | °C | mean |
+
+### Retention Tiers
+
+| Bucket | Duration | Resolution | Used for |
+|---|---|---|---|
+| `victron` | 30 days | Native ~1s | All queries involving last 7 days (always stitched into longer ranges) |
+| `victron_medium` | 1 year | 5-minute | Historical portion of ranges > 7 days |
+| `victron_hourly` | 10 years | 1-hour | Historical portion of ranges > 1 year |
+| `victron_test` | 1 day | Native ~1s | Isolated testing only — auto-expires |
+
+---
+
+## 6. API Contract
+
+Base path: `/api/v1`
+All responses: JSON. Authentication by oauth2-proxy upstream.
+
+### GET /api/v1/devices
+
+Returns all known devices with last-seen timestamp and online status.
+
+`online: true` means the decoder received a packet for that specific device MAC within the last 15 seconds. `online: false` for a specific device while other devices remain online indicates that particular Victron device has stopped broadcasting (e.g. MPPT in deep sleep due to very low light) — not a connectivity problem.
+
+The response also includes a top-level `bridge_online: bool` field. `bridge_online: false` means no MQTT data at all has arrived from the ESP32 in the last 30 seconds — indicating the ESP32, WiFi, or MQTT broker itself has a problem.
+
+```json
+{
+  "bridge_online": true,
+  "devices": [
+    {
+      "id": "mppt1",
+      "label": "MPPT North",
+      "type": "solar_charger",
+      "last_seen": "2026-05-01T14:22:31Z",
+      "online": true
+    },
+    {
+      "id": "mppt2",
+      "label": "MPPT South",
+      "last_seen": "2026-05-01T14:22:29Z",
+      "online": false
+    }
+  ]
+}
+```
+
+### GET /api/v1/current
+
+Returns the most recent reading for every field of every device. Polled every **2 seconds** by the dashboard (reduced from 10s to make live flow animations responsive to real-world cloud cover changes). Response includes `mppt1`, `mppt2`, and `battery_sense` objects with all fields from Section 5, plus a `ts` timestamp.
+
+### GET /api/v1/history
+
+Query params: `device`, `field`, `start` (e.g. -24h, -30d, -2y), `interval` (e.g. 10s, 1m, 5m, 1h)
+
+**Bucket stitching:** The API always delivers maximum resolution for the most recent data, regardless of the total range requested:
+
+- `start` within 7 days: raw `victron` only.
+- `start` within 1 year: `victron_medium` from `start` to `-1h`, unioned with raw `victron` from `-1h` to now.
+- `start` beyond 1 year: `victron_hourly` from `start` to `-7d`, unioned with `victron_medium` from `-7d` to `-1h`, unioned with raw `victron` from `-1h` to now.
+
+**Client-side interval selection — 500-point ceiling:** The dashboard must always compute and pass an `interval` that limits the response to approximately 500 points per series. A chart canvas is typically 800–1200 px wide, so more than ~500 points per series is invisible to the eye and wastes bandwidth on the internet-facing link. The formula:
+
+```
+interval_seconds = max(1, range_seconds / 500)
+```
+
+Applied to each time range selector button:
+
+| Range | Range seconds | Computed interval | Points (approx) |
+|---|---|---|---|
+| 1h | 3,600 | 7s | 514 |
+| 6h | 21,600 | 43s | 502 |
+| 24h | 86,400 | 3m | 480 |
+| 7d | 604,800 | 20m | 504 |
+| 30d | 2,592,000 | 1h 26m | 504 |
+| 6m | 15,552,000 | 8h 38m | 500 |
+| 1y | 31,536,000 | 17h 30m | 500 |
+
+The interval is rounded up to a clean human value (e.g. 43s → 1m, 20m stays 20m) before being sent. Without this ceiling a "last 6h" chart at 1-second resolution returns 65,000 points per field per device — entirely over the internet connection.
+
+Response includes `device`, `field`, `unit`, `buckets_used` (list), and `points` array of `{t, v}` objects. Points are sorted by time and deduplicated at bucket boundaries.
+
+### GET /api/v1/daily
+
+Query params: `days`, `tz_offset` (optional, falls back to server `TZ_OFFSET_HOURS` env var).
+
+Groups `yield_today` readings into local calendar days using the configured timezone offset. Returns daily totals per device and combined. Without a correct timezone offset, days appear split at UTC midnight rather than local midnight.
+
+### GET /health
+
+Returns 200 with InfluxDB connectivity status and MQTT last-received timestamp. Used by Docker healthcheck and by the dashboard to determine `bridge_online` state.
+
+---
+
+## 7. UI Specification
+
+### Layout Philosophy
+
+At-a-glance first. The most important state — what power is flowing right now — is shown as an animated energy flow diagram above the fold. Device cards are below it. Charts and device details are on demand via tabs. Mobile reflows to a single column.
+
+### Zone 1 — Header Strip
+
+Left: "Solar Monitor" + day/night indicator (sun/moon icon calculated client-side from a lat/long constant using actual sunrise/sunset). Right: three device status pills. Last-update countdown ticks client-side every second.
+
+### Zone 2 — Animated Energy Flow Diagram
+
+An SVG diagram with nodes and animated flow lines. Lines use a moving-dash CSS animation when power is non-zero; speed proportional to power magnitude. Lines are static grey when power is zero. The `/api/v1/current` endpoint is polled every **2 seconds** so that the flow animation responds noticeably to real-world changes (cloud cover, load switching).
+
+```
+  [PV North]     [PV South]
+      |               |
+  [MPPT North]  [MPPT South]
+        \           /
+         [Battery Bank]
+               |
+            [Bulb]
+```
+
+Node details:
+- **PV panels:** Voltage and power
+- **MPPT controllers:** Charge state badge (BULK=blue, ABSORPTION=amber, FLOAT=green, OFF=grey, FAULT=red) and charge current
+- **Battery:** Voltage from Battery Sense and temperature
+- **Load node:** Incandescent light bulb SVG. Glows yellow with radial glow effect and watt label when `load_power > 0`. Grey outline when OFF.
+
+### Zone 3 — Device Cards (clickable, offline-aware)
+
+Three cards. Clicking opens the matching detail tab.
+
+**Two distinct offline states, clearly distinguished in the UI:**
+
+- **BRIDGE_OFFLINE** (ESP32 / MQTT problem): A full-width warning banner appears at the top: "Bridge offline — no data from ESP32". All device cards grey out simultaneously. This state is triggered when `/api/v1/health` reports no MQTT data for more than 30 seconds, or when the API itself is unreachable.
+
+- **DEVICE_OFFLINE** (one Victron device stopped broadcasting): Only that specific card gets a yellow border and a "Sensor silent" badge. Other cards remain live. This is the normal state for an MPPT in very low light or at night. The device's last known values are shown dimmed rather than blanked out.
+
+Each MPPT card: label, charge state badge, PV power, PV voltage, charge current, battery voltage, today's yield, lifetime yield, load output (ON/OFF + watts if ON), error row, last-seen time.
+
+Battery Sense card: voltage, temperature, last-seen time.
+
+### Zone 4 — Detail Tabs
+
+Four tabs: **MPPT North | MPPT South | Battery | System**
+
+Time range selector: **1h | 6h | 24h | 7d | 30d | 6m | 1y | All**. The API stitches buckets automatically — every range shows full 1-second resolution for the last hour.
+
+- **MPPT tabs:** PV power chart, battery voltage chart, charge current chart, load power chart with ON/OFF background shading.
+- **Battery tab:** Voltage from all three sources overlaid (Battery Sense bold, MPPT readings lighter), temperature chart.
+- **System tab:** Combined PV power, 30-day daily production bar chart stacked by device, lifetime yield totals.
+
+### Update Cadence
+
+| Element | Strategy | Interval |
+|---|---|---|
+| Energy flow diagram | Polls /api/v1/current | **2 seconds** |
+| Device cards | Same poll | **2 seconds** |
+| Bridge/device online state | Same poll | **2 seconds** |
+| Last seen countdown | Client-side only | 1 second |
+| Charts | Polls /api/v1/history | 60 seconds |
+
+Chart requests always include an `interval` computed as `max(1s, range_seconds / 500)`, rounded to a clean value. This caps every chart response at ~500 points per series regardless of the selected time range, keeping payloads small over the internet-facing HTTPS connection. See Section 6 for the per-range breakdown.
+
+---
+
+## 8. Security Architecture
+
+### Authentication Flow
+
+```
+Browser -> https://solar.yourdomain.com:8443/
+  -> Nginx (TLS, X-Forwarded-Port: 8443, security headers)
+  -> oauth2-proxy (checks session cookie)
+    -> No cookie: redirect to Google OAuth
+      -> Redirect URI: https://solar.yourdomain.com:8443/oauth2/callback
+      -> oauth2-proxy checks email against allowed list
+        -> ***REDACTED***@gmail.com: set session cookie, proxy through
+        -> Any other: 403
+    -> Valid cookie: proxy to solar-api:8080
+```
+
+**Google Console setup:** The OAuth credential must list `https://solar.yourdomain.com:8443/oauth2/callback` as an authorised redirect URI. `setup.sh` prints this exact string. Nginx sets `X-Forwarded-Port: 8443` so oauth2-proxy constructs the redirect URI correctly.
+
+### Exposure Table
+
+| Surface | Internet-facing | Notes |
+|---|---|---|
+| Port 8443 (HTTPS) | Yes, intentionally | Google auth gate in front |
+| Port 80/443 | Apache only | Nginx does not bind these |
+| Port 1883 (MQTT) | No | LAN IP only, auth required |
+| Port 8086 (InfluxDB) | No | Docker-internal only |
+| Port 8080 (API) | No | Docker-internal only |
+| Port 4180 (oauth2-proxy) | No | Docker-internal only |
+
+### TLS and Security Headers
+
+TLS 1.2 minimum, TLS 1.3 preferred. Mozilla Intermediate cipher suite. Let's Encrypt via DNS-01, auto-renewed. HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin, Content-Security-Policy. Rate limit `/oauth2/` to 10 req/min/IP.
+
+Victron BLE encryption keys in `config/devices.json`, mounted read-only into the decoder. Never in env vars, never committed to git. MQTT passwords in `mosquitto/passwd`, generated by `setup.sh`, gitignored.
+
+---
+
+## 9. Device Configuration Design
+
+`config/devices.json` is auto-generated by `setup.sh` using `discover.py` output. The user never edits this file manually.
+
+```json
+{
+  "devices": [
+    { "id": "mppt1", "label": "MPPT North", "mac": "AA:BB:CC:DD:EE:01", "key": "aabb..." },
+    { "id": "mppt2", "label": "MPPT South", "mac": "AA:BB:CC:DD:EE:02", "key": "ffee..." },
+    { "id": "battery_sense", "label": "Battery Bank", "mac": "AA:BB:CC:DD:EE:03", "key": "0011..." }
+  ]
+}
+```
+
+`key: null` is valid for discovery mode. When keys are added, `docker compose restart ble-decoder` picks them up — no rebuild needed.
+
+---
+
+## 10. Interactive Install Script Design
+
+`setup.sh` drives the entire installation. The user never edits config files manually.
+
+### Auto-discovered (no user input)
+
+- Server LAN IP via `hostname -I | awk '{print $1}'`
+- WiFi networks via `nmcli device wifi list` (numbered menu)
+- Victron MACs and BLE names via `discover.py` on the live MQTT stream
+- MQTT credentials generated randomly (`openssl rand -hex 16`) and written to `mosquitto/passwd` and `esp32/secrets.yaml`
+- Whether Apache is on 80/443 (confirms no conflict)
+- Whether the server IP has a DHCP reservation (warns if not detectable)
+
+### User physical actions required
+
+1. **Server DHCP reservation** — `setup.sh` prompts to confirm this is set in the router before continuing
+2. **WiFi password** — typed once; written to `esp32/secrets.yaml` (gitignored)
+3. **Which device is which** — `discover.py` shows MAC suffix-disambiguated suggestions; user picks
+4. **Encryption keys** — step-by-step VictronConnect instructions; user pastes each
+5. **Google OAuth consent** — browser opens automatically; user clicks Allow
+6. **Domain name** — typed once in Phase 6; `setup.sh` explains why it is needed before asking:
+   - Let's Encrypt issues a TLS certificate bound to a specific domain name (e.g. `solar.example.com`). A bare IP address cannot be used — Google OAuth requires HTTPS with a trusted certificate, and Let's Encrypt does not issue certificates for IP addresses.
+   - Google OAuth requires the redirect URI `https://<domain>:8443/oauth2/callback` to be pre-registered exactly in Google Cloud Console. The domain and port must match character-for-character. `setup.sh` prints the exact string to paste after the domain is entered.
+   - The domain is entered once and written into the nginx config and the oauth2-proxy redirect URL. It is not used anywhere before Phase 6.
+7. **Router port-forward** — `setup.sh` prints the exact rule; user applies it
+8. **Google Cloud Console redirect URI** — `setup.sh` prints the exact string to paste (generated from the domain entered above)
+
+Each phase is idempotent — re-running skips already-completed steps.
+
+---
+
+## 11. Test Isolation Strategy
+
+### The core problem
+
+The Victron devices are physically far from the Linux server. The ESP32 must be near the Victrons (BLE range ~10 m). During server-side development and testing, the ESP32 may not be running or reachable. The test strategy ensures every server-side phase can be fully verified without the ESP32 or real Victron data, and without polluting production buckets.
+
+### Dedicated test bucket
+
+All isolated tests write to `victron_test` — a dedicated InfluxDB bucket with 1-day retention. Data expires automatically. Zero risk of test data appearing in production charts.
+
+### Test-prefixed device IDs
+
+Fixtures and the seed script use `test_mppt1`, `test_mppt2`, `test_battery_sense`. These can never collide with real production tags.
+
+### docker-compose.test.yml override
+
+- `ble-decoder` reads `decoder/fixtures/devices_fixture.json` (fixture keys) instead of `config/devices.json` (real keys)
+- `solar-api` sets `INFLUX_BUCKET=victron_test`
+- Mosquitto uses a test-only password file with known credentials for the replay tool
+
+```bash
+# Test mode
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+# Production mode (default)
+docker compose up -d
+```
+
+### Seed script
+
+`api/seed_test_data.py` defaults to `--bucket victron_test`. Production requires `--bucket victron` explicitly. Seed data includes both instantaneous fields (sinusoidal PV power following a daylight curve) and cumulative counters (`yield_today` incrementing through the day, resetting at local midnight per `TZ_OFFSET_HOURS`).
+
+### Fixture replay tool
+
+`decoder/replay.py` replays `decoder/fixtures/victron_sample.jsonl` — 60 seconds of real encrypted advertisement bytes. Simulates the ESP32 publishing to MQTT including authenticated connections (test credentials in `docker-compose.test.yml`).
+
+### Cleanup
+
+```bash
+influx delete --org home --bucket victron_test \
+  --start 1970-01-01T00:00:00Z \
+  --stop $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  --predicate '_measurement="solar"'
+```
+
+---
+
+## 12. Build Plan
+
+Six phases. Phases 1 and 2 can run in parallel. Every phase has a fully isolated test path.
+
+### Phase 1: ESP32 Firmware
+
+**Delivers:** ESPHome YAML with BLE scan duty cycle config, MQTT auth in secrets, `setup.sh` phase 1, fixture file and replay tool
+
+**Physical note:** ESP32 is far from the server. Flash via USB on any laptop, install near Victrons. Server development (Phases 2–5) proceeds entirely via fixture replay.
+
+**Collected just-in-time:** Server DHCP reservation confirmation, WiFi SSID (nmcli menu), WiFi password (typed once), server LAN IP (auto-detected), MQTT credentials (auto-generated by `setup.sh`)
+
+**Output:** Flashed ESP32 near Victrons, publishing authenticated MQTT messages at 50% BLE duty cycle
+
+**Isolated test:**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d mosquitto
+
+python3 decoder/replay.py --broker localhost --rate 3 --loop &
+# replay.py uses test credentials from docker-compose.test.yml
+
+mosquitto_sub -h localhost -p 1883 -u decoder -P <test_pass> -t 'victron/raw' -v
+# Should show payloads with MAC addresses and encrypted bytes
+
+kill %1
+docker compose stop mosquitto
+```
+
+**Integrated acceptance criteria:**
+- ESP32 on WiFi, appears in router DHCP table
+- ESPHome web status page reachable at ESP32's LAN IP
+- `mosquitto_sub` (authenticated) shows ~3 real Victron payloads/second
+- Anonymous connect attempt is rejected: `mosquitto_pub -h <server_ip> -t test -m x` returns "Connection Refused: not authorised"
+
+**Git commit:** `feat(esp32): ESPHome BLE duty-cycle config, MQTT auth, fixture replay`
+
+---
+
+### Phase 2: Server Infrastructure
+
+**Delivers:** `docker-compose.yml`, `docker-compose.test.yml`, Mosquitto config with auth, InfluxDB with 4 buckets and field-specific downsampling tasks, `setup.sh` phase 2 (generates MQTT password file)
+
+**Isolated test:**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d mosquitto influxdb
+
+docker compose ps mosquitto influxdb
+
+# Authenticated MQTT round-trip
+mosquitto_pub -h localhost -p 1883 -u decoder -P <test_pass> -t victron/selftest -m '{"ok":1}'
+mosquitto_sub -h localhost -p 1883 -u decoder -P <test_pass> -t victron/selftest -C 1 -W 3
+
+# Anonymous rejection test
+mosquitto_pub -h localhost -p 1883 -t victron/selftest -m "should fail"
+# Expected: Connection Refused
+
+curl http://localhost:8086/health
+
+influx write --bucket victron_test --org home 'solar,device=test_mppt1 pv_power=42.0'
+influx query --org home \
+  'from(bucket:"victron_test") |> range(start:-1m) |> filter(fn:(r)=>r.device=="test_mppt1")'
+
+influx bucket list --org home
+# Expected: victron, victron_medium, victron_hourly, victron_test
+
+# Verify downsampling tasks exist
+influx task list --org home
+# Expected: downsample_instant_5m, downsample_yield_5m, downsample_instant_1h, downsample_yield_1h
+
+influx delete --org home --bucket victron_test --start 1970-01-01T00:00:00Z \
+  --stop $(date -u +%Y-%m-%dT%H:%M:%SZ) --predicate '_measurement="solar"'
+docker compose stop mosquitto influxdb
+```
+
+**Acceptance criteria:** Both containers healthy. Authenticated MQTT round-trip passes. Anonymous connection rejected. 4 buckets + 4 downsampling tasks present.
+
+**Git commit:** `feat(infra): mosquitto auth, influxdb 4-bucket field-specific downsampling`
+
+---
+
+### Phase 3: BLE Decoder + Device Discovery
+
+**Delivers:** Python decoder with server-side timestamping and write retry buffer, `discover.py` with MAC-suffix disambiguation, `setup.sh` phase 3
+
+**Isolated test:**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.test.yml \
+  up -d mosquitto influxdb ble-decoder
+
+python3 decoder/replay.py --broker localhost --rate 3 --loop &
+
+docker compose logs -f ble-decoder
+# Expected: "[test_mppt1] decoded and timestamped server-side: pv_power=45.2 charge_state=Float"
+# Expected: NO "no key configured" errors
+
+influx query --org home \
+  'from(bucket:"victron_test") |> range(start:-2m) |> group(columns:["device"]) |> count()'
+# Expected: test_mppt1, test_mppt2, test_battery_sense each with count > 0
+
+influx query --org home 'from(bucket:"victron") |> range(start:-2m) |> count()'
+# Expected: empty — nothing in production bucket
+
+# Test write retry resilience: stop InfluxDB briefly, confirm decoder buffers, restart
+docker compose stop influxdb
+sleep 10
+docker compose start influxdb
+# Check decoder logs: should show retry attempts then successful resume, no crash
+
+kill %1
+influx delete --org home --bucket victron_test --start 1970-01-01T00:00:00Z \
+  --stop $(date -u +%Y-%m-%dT%H:%M:%SZ) --predicate '_measurement="solar"'
+docker compose stop ble-decoder mosquitto influxdb
+```
+
+**Discovery procedure (requires ESP32 near Victrons):**
+```
+python3 decoder/discover.py
+
+Found: SmartSolar MPPT 75|10 | MAC: AA:BB:CC:DD:EE:01 | Suggested ID: smartsolar_ee01
+Found: SmartSolar MPPT 75|10 | MAC: AA:BB:CC:DD:EE:02 | Suggested ID: smartsolar_ee02
+Found: Smart Battery Sense    | MAC: AA:BB:CC:DD:EE:03 | Suggested ID: battery_sense_ee03
+
+Which device is MPPT North? [1-3]: _
+Which device is MPPT South? [1-3]: _
+
+Step 1: Open VictronConnect. Tap "SmartSolar MPPT 75|10" with suffix EE:01.
+Step 2: Tap the three-dot menu. Tap Product Info. Scroll to Encryption Key.
+Paste encryption key for MPPT North: _
+```
+
+**Integrated acceptance criteria:** Decoder logs show successful decodes with server-assigned timestamps. `victron` bucket has data for all three real device tags at ~1/second. Decoder survives a 10-second InfluxDB outage and resumes without losing data from the buffer period.
+
+**Git commit:** `feat(decoder): server-side timestamps, write retry buffer, MAC-suffix discovery`
+
+---
+
+### Phase 4: API Service
+
+**Delivers:** FastAPI with bucket stitching, timezone-aware `/daily`, `bridge_online` in `/devices`, pytest suite, `seed_test_data.py` with correct `yield_today` simulation
+
+**Isolated test:**
+```bash
+docker compose up -d influxdb
+python3 api/seed_test_data.py --hours 72  # writes to victron_test with correct yield_today arc
+
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d solar-api
+
+python3 -m pytest api/tests/ -v
+# Tests include:
+# - bucket stitching: -30d query uses victron_test (medium) for days 2-30, raw for last 1h
+# - yield fields use max aggregate, instantaneous fields use mean
+# - /devices returns bridge_online and per-device online fields
+# - /daily groups by local midnight not UTC midnight (TZ_OFFSET_HOURS)
+# - online: false when device data > 15s old; bridge_online: false when all data > 30s old
+
+curl -s "http://localhost:8080/api/v1/history?device=test_mppt1&field=pv_power&start=-30d&interval=5m" \
+  | python3 -m json.tool
+# buckets_used should list ["victron_test", "victron_test"] (medium + raw stitch)
+
+curl -s "http://localhost:8080/api/v1/history?device=test_mppt1&field=yield_today&start=-7d&interval=1h" \
+  | python3 -m json.tool
+# Values should be monotonically increasing per day then reset — confirms max not mean
+
+influx delete --org home --bucket victron_test --start 1970-01-01T00:00:00Z \
+  --stop $(date -u +%Y-%m-%dT%H:%M:%SZ) --predicate '_measurement="solar"'
+docker compose stop solar-api influxdb
+```
+
+**Acceptance criteria:** All pytest tests pass. Bucket stitching confirmed in `buckets_used`. Yield fields are max aggregated. Daily bars align to local midnight. Bridge/device online states correct.
+
+**Git commit:** `feat(api): bucket stitching, timezone-aware daily, bridge_online, pytest`
+
+---
+
+### Phase 5: Dashboard UI
+
+**Delivers:** `index.html` — animated SVG energy flow (2s refresh), incandescent bulb, BRIDGE_OFFLINE vs DEVICE_OFFLINE distinction, clickable cards, tabbed charts
+
+**Isolated test:**
+```bash
+docker compose up -d influxdb
+python3 api/seed_test_data.py --hours 72
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d solar-api
+# Open browser to http://localhost:8080
+```
+
+**Manual UI acceptance checklist:**
+- Energy flow lines animate visibly; changes in seed data power values affect animation speed
+- Load bulb glows yellow with watts when ON; grey outline when OFF
+- Day/night indicator correct for current local time
+- 2-second polling: changing a seed data value manually via influx CLI is reflected in the UI within ~3 seconds
+- BRIDGE_OFFLINE test: stop the API container — full-width banner appears, all cards grey out
+- DEVICE_OFFLINE test: stop seed data for one device only, wait 20s — only that card shows yellow "Sensor silent" badge; other cards remain live
+- Bucket stitching visible: 30d chart has fine-grained live tail in DevTools Network response
+- Yield chart for 7d shows daily-reset pattern (rises through day, drops at local midnight not UTC midnight)
+- Chart interval verification: open DevTools Network tab, confirm 6h chart requests interval=1m not interval=1s
+
+**Cleanup:** same influx delete as Phase 4.
+
+**Git commit:** `feat(ui): 2s polling, BRIDGE/DEVICE offline distinction, flow diagram, interval ceiling`
+
+---
+
+### Phase 6: Auth + TLS + Domain
+
+**Delivers:** Nginx config with `X-Forwarded-Port: 8443`, oauth2-proxy config, DNS-01 cert, router instructions, `setup.sh` phase 6 (prints exact Google Console redirect URI)
+
+**Isolated pre-flight:**
+```bash
+docker run --rm -v $(pwd)/nginx/nginx.conf:/etc/nginx/nginx.conf:ro nginx:alpine nginx -t
+# Verify X-Forwarded-Port header is in the config
+```
+
+**Integrated acceptance criteria:**
+- `https://solar.yourdomain.com:8443` presents Google login (no TLS warning)
+- `***REDACTED***@gmail.com` reaches the dashboard; any other account gets 403
+- `curl -I https://solar.yourdomain.com:8443` shows `Strict-Transport-Security` and correct headers
+- OAuth redirect URI `https://solar.yourdomain.com:8443/oauth2/callback` works — no `redirect_uri_mismatch` error
+- SSL Labs grade A
+- `systemctl status certbot.timer` shows active
+
+**Git commit:** `feat(auth): nginx X-Forwarded-Port, oauth2-proxy, DNS-01 TLS`
+
+---
+
+## 13. Outstanding Items — Just-In-Time Collection
+
+| Item | Phase | How collected |
+|---|---|---|
+| Server DHCP reservation confirmation | 1 | `setup.sh` prompts to verify before continuing |
+| WiFi SSID | 1 | `nmcli` numbered menu |
+| WiFi password | 1 | Typed once; written to `esp32/secrets.yaml` (gitignored) |
+| MQTT credentials | 1 | Auto-generated by `setup.sh`; written to `mosquitto/passwd` and `esp32/secrets.yaml` |
+| Server LAN IP | 1 | Auto-detected via `hostname -I` |
+| Device MACs | 3 | Auto-detected by `discover.py` |
+| Device labels | 3 | Auto-read from BLE advertisement; user confirms North/South |
+| Encryption keys | 3 | Step-by-step VictronConnect instructions printed by `setup.sh` |
+| Timezone offset | 4 | `setup.sh` detects from `timedatectl` or asks once |
+| Domain name | 6 | Typed once; needed for Let's Encrypt cert (cannot use bare IP) and Google OAuth redirect URI (must match exactly) |
+| OAuth Client ID + Secret | 6 | `setup.sh` opens browser to Google Cloud Console; prints exact steps |
+| Google Console redirect URI | 6 | Auto-generated from domain: `https://<domain>:8443/oauth2/callback` — `setup.sh` prints the exact string to paste |
+| DNS provider API key | 6 | Typed once |
+| Router port-forward rule | 6 | `setup.sh` prints exact rule |
+
+---
+
+## Appendix A: Victron BLE Encryption
+
+Victron devices on firmware after mid-2022 encrypt BLE advertisements with AES-128-CTR. The key is fixed and visible in VictronConnect: tap the device, three-dot menu, Product Info, scroll to Encryption Key.
+
+If devices are on older firmware they broadcast unencrypted. The decoder detects this automatically. You will know within minutes of Phase 3 whether keys are needed.
+
+---
+
+## Appendix B: Alternatives Considered
+
+### ESP32 Firmware
+
+**ESPHome** (chosen): YAML-configured firmware, built-in OTA, WiFi reconnection, BLE advertisement scanning with configurable duty cycle. No hand-written C++.
+
+**Raw Arduino/PlatformIO:** Full control but requires WiFi reconnection, OTA, BLE scanning, and MQTT from scratch. Too much custom code for a permanently wall-mounted device. Rejected.
+
+**MicroPython:** BLE passive advertisement scanning on ESP32 is incomplete and unreliable. Rejected.
+
+**Tasmota:** Not designed for relaying raw BLE manufacturer data. Rejected.
+
+### Database
+
+**InfluxDB 2.x** (chosen): Purpose-built time-series, field-specific downsampling tasks, Flux query language. OSS version free, runs in Docker.
+
+**TimescaleDB:** More complex, heavier. Only needed for relational joins. Rejected.
+
+**SQLite:** No built-in downsampling, no concurrent write safety at this write rate. Rejected.
+
+### Auth
+
+**oauth2-proxy** (chosen): Single binary, flat-file email whitelist, handles non-standard port forwarding headers correctly when configured.
+
+**Authelia:** Vastly over-engineered for a single-user app. Rejected.
+
+**Custom FastAPI OAuth2:** Adds significant security surface. Rejected.
+
+### MQTT Payload Compression (Delta / RLE)
+
+A delta-encoding or run-length-encoding scheme was considered for the MQTT payload (the raw Victron advertisement bytes relayed by the ESP32). The proposal was: since consecutive advertisements from the same device differ by small amounts, transmit only the delta rather than the full payload, reducing byte count and ESP32 transmission time.
+
+**Why it is not implemented:**
+
+The raw Victron BLE advertisement payload is **AES-128-CTR encrypted**. AES-CTR is a stream cipher — its output is indistinguishable from random bytes by design. Consecutive ciphertext blocks share no structural similarity even when the underlying plaintext values change by only 0.1 V. Applying delta encoding or RLE to encrypted bytes produces output that is the same size or larger than the input. The compression ratio is effectively 1.0, with added complexity.
+
+The raw payload is also already small: each Victron advertisement is approximately 50–100 bytes. At three devices broadcasting once per second, the MQTT throughput is roughly 150–300 bytes/second — well under 1 KB/s. This is negligible even on a congested 2.4 GHz network. Bandwidth is not a constraint on this path.
+
+**What about HTTPS compression?** HTTPS applies gzip/brotli compression to the HTTP response body between the server and the user's browser. This compresses dashboard API responses (JSON) before they travel over the internet — genuinely useful for chart data payloads returning hundreds of data points. But this is entirely separate from the ESP32 → MQTT → decoder path, which never involves HTTP.
+
+**Decision:** No compression on the ESP32 MQTT path. The existing AES-128-CTR Victron encryption already prevents any meaningful compression at that layer. HTTPS compression of API responses is enabled by default in nginx and provides value on the browser-facing path with no ESP32 involvement. Adding delta/RLE would increase ESP32 firmware complexity, use additional RAM, and produce zero reduction in actual byte count.

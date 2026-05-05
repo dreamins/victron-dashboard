@@ -1,0 +1,22 @@
+{
+  "devices": [
+    {
+      "id": "test_mppt1",
+      "label": "Test MPPT North",
+      "mac": "AA:BB:CC:DD:EE:01",
+      "key": "aabbccddeeff00112233445566778899"
+    },
+    {
+      "id": "test_mppt2",
+      "label": "Test MPPT South",
+      "mac": "AA:BB:CC:DD:EE:02",
+      "key": "bbccddeeff00112233445566778899aa"
+    },
+    {
+      "id": "test_battery_sense",
+      "label": "Test Battery Bank",
+      "mac": "AA:BB:CC:DD:EE:03",
+      "key": "ccddeeff00112233445566778899aabb"
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+name: victron
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    # Passwd file is generated at startup from env vars — no host tool required.
+    entrypoint: >
+      sh -c "
+        mosquitto_passwd -b -c /mosquitto/config/passwd esp32-bridge $$MQTT_ESP32_PASS &&
+        mosquitto_passwd -b /mosquitto/config/passwd decoder $$MQTT_DECODER_PASS &&
+        exec mosquitto -c /mosquitto/config/mosquitto.conf
+      "
+    ports:
+      - "${MQTT_BIND_IP:-0.0.0.0}:1883:1883"
+    environment:
+      - MQTT_ESP32_PASS=${MQTT_ESP32_PASS}
+      - MQTT_DECODER_PASS=${MQTT_DECODER_PASS}
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  influxdb:
+    image: influxdb:2.7
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_ADMIN_PASS}
+      - DOCKER_INFLUXDB_INIT_ORG=home
+      - DOCKER_INFLUXDB_INIT_BUCKET=victron
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
+    restart: unless-stopped
+
+  ble-decoder:
+    build: ./decoder
+    depends_on:
+      - mosquitto
+      - influxdb
+    environment:
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=1883
+      - MQTT_USERNAME=decoder
+      - MQTT_PASSWORD=${MQTT_DECODER_PASS}
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUX_ORG=home
+      - INFLUX_BUCKET=victron
+    volumes:
+      - ./config/devices.json:/app/devices.json:ro
+    restart: unless-stopped
+
+  solar-api:
+    build: ./api
+    depends_on:
+      - influxdb
+    environment:
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUX_ORG=home
+      - INFLUX_BUCKET=victron
+      - TZ_OFFSET_HOURS=${TZ_OFFSET_HOURS:-0}
+    restart: unless-stopped
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:latest
+    depends_on:
+      - solar-api
+    volumes:
+      - ./config/allowed_emails:/etc/allowed_emails:ro
+    environment:
+      - OAUTH2_PROXY_PROVIDER=google
+      - OAUTH2_PROXY_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - OAUTH2_PROXY_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - OAUTH2_PROXY_COOKIE_SECRET=${OAUTH2_COOKIE_SECRET}
+      - OAUTH2_PROXY_EMAIL_DOMAIN=*
+      - OAUTH2_PROXY_AUTHENTICATED_EMAILS_FILE=/etc/allowed_emails
+      - OAUTH2_PROXY_UPSTREAM=http://solar-api:8080
+      - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
+      - OAUTH2_PROXY_REDIRECT_URL=https://${DOMAIN}:8443/oauth2/callback
+      - OAUTH2_PROXY_COOKIE_SECURE=true
+      - OAUTH2_PROXY_COOKIE_HTTPONLY=true
+      - OAUTH2_PROXY_COOKIE_SAMESITE=strict
+      - OAUTH2_PROXY_COOKIE_EXPIRE=24h
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8443:443"
+      - "8080:80"
+    depends_on:
+      - oauth2-proxy
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certs:/etc/letsencrypt:ro
+    restart: unless-stopped
+
+volumes:
+  influxdb-data:
+  influxdb-config:
+  certs:
