@@ -6,7 +6,8 @@ esphome:
   friendly_name: Victron Bridge
 
 esp32:
-  board: esp32dev
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
   framework:
     type: esp-idf
 
@@ -57,7 +58,7 @@ esp32_ble_tracker:
     then:
       - lambda: |-
           for (auto &mf : x.get_manufacturer_datas()) {
-            if (mf.uuid == espbt::ESPBTUUID::from_uint16(0x02E1)) {
+            if (mf.uuid == esp32_ble::ESPBTUUID::from_uint16(0x02E1)) {
               std::string mac = x.address_str();
               std::string hex;
               char buf[3];
