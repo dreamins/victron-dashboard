@@ -8,6 +8,10 @@ services:
     ports:
       - "1883:1883"
 
+  influxdb:
+    ports:
+      - "127.0.0.1:8086:8086"
+
   ble-decoder:
     volumes:
       - ./decoder/fixtures/devices_fixture.json:/app/devices.json:ro

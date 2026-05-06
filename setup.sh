@@ -145,7 +145,38 @@ EOF
 
 # ─── Stubs for future phases ─────────────────────────────────────────────────
 
-phase2() { header "Phase 2 — Server Infrastructure"; die "Not yet implemented. See victron-system-design.md §12 Phase 2."; }
+phase2() {
+    header "Phase 2 — Server Infrastructure"
+
+    command -v docker &>/dev/null || die "docker not found. Install Docker and re-run."
+    command -v openssl &>/dev/null || die "openssl not found."
+    [[ -f .env ]] || die ".env not found. Run ./setup.sh 1 first."
+    grep -q "^MQTT_BIND_IP=" .env || die "MQTT_BIND_IP missing from .env. Run ./setup.sh 1 first."
+
+    # Idempotency: skip credential generation if already present
+    if grep -q "^INFLUXDB_TOKEN=" .env 2>/dev/null; then
+        warn "InfluxDB credentials already in .env — skipping generation"
+    else
+        INFLUXDB_TOKEN=$(openssl rand -hex 32)
+        INFLUXDB_ADMIN_PASS=$(openssl rand -hex 16)
+        set_env INFLUXDB_TOKEN      "$INFLUXDB_TOKEN"
+        set_env INFLUXDB_ADMIN_PASS "$INFLUXDB_ADMIN_PASS"
+        ok "InfluxDB credentials generated"
+    fi
+
+    ok "Starting mosquitto and influxdb..."
+    docker compose up -d mosquitto influxdb
+
+    ok "Waiting for InfluxDB (may take ~30s on first run while init scripts execute)..."
+    for i in $(seq 1 40); do
+        docker compose exec -T influxdb influx ping &>/dev/null && break
+        sleep 3
+    done
+    docker compose exec -T influxdb influx ping &>/dev/null || die "InfluxDB did not become ready in 120s"
+    ok "InfluxDB is healthy"
+
+    ok "Phase 2 complete — run ./test_phase2.sh to verify"
+}
 phase3() { header "Phase 3 — BLE Decoder";          die "Not yet implemented. See victron-system-design.md §12 Phase 3."; }
 phase4() { header "Phase 4 — API Service";           die "Not yet implemented. See victron-system-design.md §12 Phase 4."; }
 phase5() { header "Phase 5 — Dashboard UI";          die "Not yet implemented. See victron-system-design.md §12 Phase 5."; }
