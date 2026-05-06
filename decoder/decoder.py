@@ -92,7 +92,8 @@ class Decoder:
         self._buffer: collections.deque = collections.deque(maxlen=BUFFER_SIZE)
         self._cv = threading.Condition()
 
-        self.influx = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+        # 3-second timeout so write failures surface quickly (enables prompt retry/buffering)
+        self.influx = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG, timeout=3_000)
         self.write_api = self.influx.write_api(write_options=SYNCHRONOUS)
 
         writer = threading.Thread(target=self._writer_loop, daemon=True)

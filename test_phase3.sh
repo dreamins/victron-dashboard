@@ -107,7 +107,7 @@ run docker compose -f docker-compose.yml -f docker-compose.test.yml \
     --fixture /app/fixtures/victron_sample.jsonl \
     --rate 3 || true
 
-sleep 3  # let writer attempt writes and log retries
+sleep 8  # let writer attempt writes and log retries (influxdb-client timeout is 3s + 1s retry gap)
 
 # 7. Decoder logged retry attempts
 if docker compose logs ble-decoder 2>/dev/null | grep -qE "retry in|influx write.*failed"; then
