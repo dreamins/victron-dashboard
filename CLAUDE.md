@@ -106,13 +106,19 @@ Internet → nginx (8443 TLS) → oauth2-proxy (Google OAuth) → solar-api (Fas
 
 The design doc defines 6 isolated phases, each with acceptance criteria:
 1. ✅ ESP32 firmware (`esp32/victron-bridge.yaml` via ESPHome) — real payloads flowing
-2. Server infrastructure (Docker, Mosquitto, InfluxDB with downsampling tasks)
+2. ✅ Server infrastructure (Docker, Mosquitto, InfluxDB with downsampling tasks) — 4 buckets + 4 tasks verified
 3. BLE decoder + device discovery (`decoder/`)
 4. API service (`api/main.py`, bucket stitching, timezone-aware `/daily`)
 5. Dashboard UI (`api/static/index.html`, animated SVG energy flow)
 6. Auth + TLS (nginx, oauth2-proxy, Let's Encrypt DNS-01)
 
 **ESP32-S3 specifics (learned during Phase 1):** board target is `esp32-s3-devkitc-1`, variant `esp32s3`. BLE UUID type lives in `esphome::esp32_ble` namespace — reference as `esp32_ble::ESPBTUUID::from_uint16()` in lambdas (the old `espbt::` namespace is gone in ESPHome 2026).
+
+**InfluxDB init scripts (Phase 2):** `influxdb/init/` scripts run once on first container start (empty data volume). `01_buckets.sh` creates victron_medium/victron_hourly/victron_test; `02_tasks.sh` creates the 4 Flux downsampling tasks. Init does NOT re-run on container restarts.
+
+**Mosquitto passwd persistence:** eclipse-mosquitto declares `/mosquitto/config` as a Docker VOLUME so the passwd file survives container recreations. The entrypoint does `rm -f /mosquitto/config/passwd` before recreating it — this is intentional and prevents stale credentials from a previous run blocking startup.
+
+**Bash arithmetic gotcha in test scripts:** `((N++))` returns exit code 1 when N=0. Use `N=$((N+1))` in test scripts that use `set -e`.
 
 Each phase is test-isolated using a dedicated `victron_test` InfluxDB bucket, fixture replay, and the `docker-compose.test.yml` override.
 
