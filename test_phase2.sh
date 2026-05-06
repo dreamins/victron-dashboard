@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -8,106 +8,137 @@ GREEN='\033[0;32m'; RED='\033[0;31m'; BOLD='\033[1m'; NC='\033[0m'
 
 PASS=0; FAIL=0
 
-pass() { echo -e "${GREEN}[PASS]${NC} $*"; ((PASS++)); }
-fail() { echo -e "${RED}[FAIL]${NC} $*"; ((FAIL++)); }
+pass() { echo -e "${GREEN}[PASS]${NC} $*"; PASS=$((PASS+1)); }
+fail() { echo -e "${RED}[FAIL]${NC} $*"; FAIL=$((FAIL+1)); }
+
+run() { "$@" 2>/dev/null; }
 
 # ─── Setup ───────────────────────────────────────────────────────────────────
 
 echo -e "\n${BOLD}Phase 2 test — server infrastructure${NC}\n"
 
-docker compose -f docker-compose.yml -f docker-compose.test.yml up -d mosquitto influxdb
+# Stop any running production stack services that conflict with test ports
+docker compose stop mosquitto influxdb 2>/dev/null || true
+sleep 2
 
-# Wait for mosquitto
+# MQTT_BIND_IP=127.0.0.1 so mosquitto binds loopback only — avoids conflicting with
+# the production ***REDACTED_SERVER_IP***:1883 binding if that container restarts during cleanup.
+MQTT_BIND_IP=127.0.0.1 docker compose -f docker-compose.yml -f docker-compose.test.yml \
+    up -d mosquitto influxdb 2>&1 | grep -v "^time=" || true
+
+# Wait for mosquitto (up to 40s)
 for i in $(seq 1 20); do
-    docker compose exec -T mosquitto mosquitto_pub \
-        -h localhost -u decoder -P test_decoder_pass \
-        -t victron/ping -m x &>/dev/null && break
+    run docker compose exec -T mosquitto \
+        mosquitto_pub -h localhost -u decoder -P test_decoder_pass \
+        -t victron/ping -m x && break
     sleep 2
 done
 
-# Wait for influxdb
+# Wait for influxdb (up to 120s — first run runs init scripts)
 for i in $(seq 1 40); do
-    docker compose exec -T influxdb influx ping &>/dev/null && break
+    run docker compose exec -T influxdb influx ping && break
     sleep 3
 done
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
 
 # 1. InfluxDB ping
-docker compose exec -T influxdb influx ping &>/dev/null \
-    && pass "influxdb ping" \
-    || fail "influxdb ping"
+if run docker compose exec -T influxdb influx ping; then
+    pass "influxdb ping"
+else
+    fail "influxdb ping"
+fi
 
-# 2. Anonymous MQTT rejected (exit non-zero = rejected)
-! docker compose exec -T mosquitto mosquitto_pub -h localhost -t test -m x &>/dev/null \
-    && pass "anonymous MQTT rejected" \
-    || fail "anonymous MQTT rejected"
+# 2. Anonymous MQTT rejected
+if run docker compose exec -T mosquitto mosquitto_pub -h localhost -t test -m x; then
+    fail "anonymous MQTT should be rejected"
+else
+    pass "anonymous MQTT rejected"
+fi
 
 # 3. Authenticated MQTT round-trip
-docker compose exec -T mosquitto mosquitto_pub \
+PUB_RC=0
+run docker compose exec -T mosquitto mosquitto_pub \
     -h localhost -u decoder -P test_decoder_pass \
-    -t victron/selftest -m '{"ok":1}' -r &>/dev/null
+    -t victron/selftest -m '{"ok":1}' -r || PUB_RC=$?
 
-MSG=$(docker compose exec -T mosquitto mosquitto_sub \
-    -h localhost -u decoder -P test_decoder_pass \
-    -t victron/selftest -C 1 -W 5 2>/dev/null || true)
+MSG=""
+if [[ $PUB_RC -eq 0 ]]; then
+    MSG=$(run docker compose exec -T mosquitto mosquitto_sub \
+        -h localhost -u decoder -P test_decoder_pass \
+        -t victron/selftest -C 1 -W 5 || true)
+fi
 
-[[ "$MSG" == *'"ok":1'* ]] \
-    && pass "authenticated MQTT round-trip" \
-    || fail "authenticated MQTT round-trip (got: $MSG)"
+if [[ "$MSG" == *'"ok":1'* ]]; then
+    pass "authenticated MQTT round-trip"
+else
+    fail "authenticated MQTT round-trip (pub_rc=$PUB_RC, got: '$MSG')"
+fi
 
 # clean retained message
-docker compose exec -T mosquitto mosquitto_pub \
+run docker compose exec -T mosquitto mosquitto_pub \
     -h localhost -u decoder -P test_decoder_pass \
-    -t victron/selftest -m '' -r &>/dev/null || true
+    -t victron/selftest -m '' -r || true
 
 # 4. Write to victron_test bucket
-docker compose exec -T influxdb influx write \
+if run docker compose exec -T influxdb influx write \
     --org home --bucket victron_test \
-    'solar,device=test_mppt1 pv_power=42.0' &>/dev/null \
-    && pass "write to victron_test" \
-    || fail "write to victron_test"
+    'solar,device=test_mppt1 pv_power=42.0'; then
+    pass "write to victron_test"
+else
+    fail "write to victron_test"
+fi
 
 # 5. Query victron_test bucket
 sleep 1
-RESULT=$(docker compose exec -T influxdb influx query --org home \
-    'from(bucket:"victron_test") |> range(start:-1m) |> filter(fn:(r)=>r.device=="test_mppt1")' \
-    2>/dev/null || true)
+RESULT=$(run docker compose exec -T influxdb influx query --org home \
+    'from(bucket:"victron_test") |> range(start:-1m) |> filter(fn:(r)=>r.device=="test_mppt1")' || true)
 
-[[ "$RESULT" == *"test_mppt1"* ]] \
-    && pass "query victron_test" \
-    || fail "query victron_test"
+if [[ "$RESULT" == *"test_mppt1"* ]]; then
+    pass "query victron_test"
+else
+    fail "query victron_test (got: '$RESULT')"
+fi
 
 # 6. All 4 buckets present
-BUCKETS=$(docker compose exec -T influxdb influx bucket list --org home 2>/dev/null || true)
+BUCKETS=$(run docker compose exec -T influxdb influx bucket list --org home || true)
 
 for bucket in victron victron_medium victron_hourly victron_test; do
-    [[ "$BUCKETS" == *"$bucket"* ]] \
-        && pass "bucket $bucket exists" \
-        || fail "bucket $bucket missing"
+    if [[ "$BUCKETS" == *"$bucket"* ]]; then
+        pass "bucket $bucket exists"
+    else
+        fail "bucket $bucket missing"
+    fi
 done
 
 # 7. All 4 tasks present
-TASKS=$(docker compose exec -T influxdb influx task list --org home 2>/dev/null || true)
+TASKS=$(run docker compose exec -T influxdb influx task list --org home || true)
 
 for task in downsample_instant_5m downsample_yield_5m downsample_instant_1h downsample_yield_1h; do
-    [[ "$TASKS" == *"$task"* ]] \
-        && pass "task $task exists" \
-        || fail "task $task missing"
+    if [[ "$TASKS" == *"$task"* ]]; then
+        pass "task $task exists"
+    else
+        fail "task $task missing"
+    fi
 done
 
 # ─── Cleanup ─────────────────────────────────────────────────────────────────
 
-docker compose exec -T influxdb influx delete \
+run docker compose exec -T influxdb influx delete \
     --org home --bucket victron_test \
     --start 1970-01-01T00:00:00Z \
     --stop "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --predicate '_measurement="solar"' &>/dev/null || true
+    --predicate '_measurement="solar"' || true
 
-docker compose stop mosquitto influxdb &>/dev/null
+docker compose stop mosquitto influxdb 2>/dev/null || true
 
 # ─── Result ──────────────────────────────────────────────────────────────────
 
 echo ""
 echo -e "${BOLD}Results: ${GREEN}${PASS} passed${NC}, ${RED}${FAIL} failed${NC}"
-[[ $FAIL -eq 0 ]] && echo -e "${GREEN}Phase 2 PASS${NC}" || { echo -e "${RED}Phase 2 FAIL${NC}"; exit 1; }
+if [[ $FAIL -eq 0 ]]; then
+    echo -e "${GREEN}Phase 2 PASS${NC}"
+else
+    echo -e "${RED}Phase 2 FAIL${NC}"
+    exit 1
+fi

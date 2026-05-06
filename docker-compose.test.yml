@@ -5,12 +5,6 @@ services:
     environment:
       - MQTT_ESP32_PASS=test_esp32_pass
       - MQTT_DECODER_PASS=test_decoder_pass
-    ports:
-      - "1883:1883"
-
-  influxdb:
-    ports:
-      - "127.0.0.1:8086:8086"
 
   ble-decoder:
     volumes:
