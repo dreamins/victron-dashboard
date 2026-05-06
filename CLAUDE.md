@@ -4,7 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-This is a **pre-build** project. The full system design lives in `victron-system-design.md` (v4.3). No application code exists yet — that document is the authoritative specification for everything to be built.
+Phase 1 (ESP32 firmware + MQTT broker) is **complete and verified** — real Victron BLE payloads flowing to production MQTT at ***REDACTED_SERVER_IP***. Phases 2–6 are not yet started.
+
+The full system design lives in `victron-system-design.md` (v4.3). That document is the authoritative specification.
+
+## Installation
+
+**Prerequisites:** Linux server (tested: Ubuntu/Debian with Docker), ESP32-S3 dev board, Windows PC for flashing.
+
+**Flashing the ESP32 (Windows, one-time):**
+1. Install ESPHome: `pip install esphome`
+2. Copy `esp32/secrets.yaml.example` → `esp32/secrets.yaml` and fill in values (or run `setup.sh` on the Linux server first — it generates the file)
+3. Plug in ESP32-S3 via USB; identify the COM port (Device Manager → Ports)
+4. `cd esp32 && esphome run victron-bridge.yaml --device COMx`
+
+**Server setup (Linux, interactive):**
+```bash
+git clone <repo> ~/victron-dashboard
+cd ~/victron-dashboard
+./setup.sh   # interactive — asks for WiFi SSID, generates all credentials, starts Docker stack
+```
+`setup.sh` is idempotent: re-running it skips already-done steps. It writes `esp32/secrets.yaml` (for ESP32 flashing) and `.env` (for Docker) — both gitignored.
+
+**Hardware notes:**
+- Board: ESP32-S3 (`esp32-s3-devkitc-1`), flashed from Windows via USB
+- ESP32 at ***REDACTED_ESP32_IP*** on local LAN; web UI at `http://***REDACTED_ESP32_IP***/`
+- Production MQTT broker: ***REDACTED_SERVER_IP***:1883 (LAN-only, no anonymous access)
 
 ## What This Is
 
@@ -45,6 +70,10 @@ Internet → nginx (8443 TLS) → oauth2-proxy (Google OAuth) → solar-api (Fas
 
 ## Working Style
 
+**Never declare a phase complete unless every acceptance criterion in victron-system-design.md §12 is met** — including physical steps (flashing hardware, running setup.sh, verifying real device data). The isolated test passing is a sub-step, not completion.
+
+**Never push to GitHub unless the user explicitly requests it.** Commit locally freely; push only on explicit instruction.
+
 **Never give the user a list of commands to run manually.** Tests, setup, git operations — all go into scripts. The user runs one thing and gets a PASS/FAIL result. When something requires the Linux machine, ask for the output of ONE command, not a sequence.
 
 ## Credentials and Configuration
@@ -76,12 +105,14 @@ Internet → nginx (8443 TLS) → oauth2-proxy (Google OAuth) → solar-api (Fas
 ## Build Phases
 
 The design doc defines 6 isolated phases, each with acceptance criteria:
-1. ESP32 firmware (`esp32/victron-bridge.yaml` via ESPHome)
+1. ✅ ESP32 firmware (`esp32/victron-bridge.yaml` via ESPHome) — real payloads flowing
 2. Server infrastructure (Docker, Mosquitto, InfluxDB with downsampling tasks)
 3. BLE decoder + device discovery (`decoder/`)
 4. API service (`api/main.py`, bucket stitching, timezone-aware `/daily`)
 5. Dashboard UI (`api/static/index.html`, animated SVG energy flow)
 6. Auth + TLS (nginx, oauth2-proxy, Let's Encrypt DNS-01)
+
+**ESP32-S3 specifics (learned during Phase 1):** board target is `esp32-s3-devkitc-1`, variant `esp32s3`. BLE UUID type lives in `esphome::esp32_ble` namespace — reference as `esp32_ble::ESPBTUUID::from_uint16()` in lambdas (the old `espbt::` namespace is gone in ESPHome 2026).
 
 Each phase is test-isolated using a dedicated `victron_test` InfluxDB bucket, fixture replay, and the `docker-compose.test.yml` override.
 
