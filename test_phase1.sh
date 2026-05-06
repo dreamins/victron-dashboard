@@ -9,11 +9,12 @@ pass() { echo -e "${GREEN}[PASS]${NC} $*"; }
 fail() { echo -e "${RED}[FAIL]${NC} $*"; FAILED=1; }
 info() { echo -e "${YELLOW}[....] $*${NC}"; }
 FAILED=0
+REPLAY_PID=""
 
 cleanup() {
     info "Cleaning up..."
     docker compose stop mosquitto 2>/dev/null || true
-    kill "$REPLAY_PID" 2>/dev/null || true
+    [[ -n "$REPLAY_PID" ]] && kill "$REPLAY_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -25,19 +26,29 @@ if python3 -c "import paho.mqtt.client" 2>/dev/null; then
     pass "paho-mqtt available"
 else
     info "Installing paho-mqtt..."
-    pip install -q paho-mqtt
+    sudo apt-get install -y python3-paho-mqtt -q 2>&1 | tail -2
     python3 -c "import paho.mqtt.client" && pass "paho-mqtt installed" || { fail "paho-mqtt install failed"; exit 1; }
 fi
 
 # ── 2. Start mosquitto in test mode ─────────────────────────────────────────
 info "Starting mosquitto (test mode)..."
 docker compose -f docker-compose.yml -f docker-compose.test.yml up -d mosquitto
-sleep 3
 
-if docker compose ps mosquitto | grep -q "Up\|running"; then
-    pass "mosquitto container running"
+info "Waiting for mosquitto to accept connections..."
+READY=0
+for i in $(seq 1 15); do
+    if docker run --rm --network host eclipse-mosquitto:2 \
+           mosquitto_sub -h localhost -p 1883 -u decoder -P test_decoder_pass \
+           -t '$SYS/#' -C 1 -W 1 2>/dev/null; then
+        READY=1; break
+    fi
+    sleep 1
+done
+
+if [[ "$READY" -eq 1 ]]; then
+    pass "mosquitto ready"
 else
-    fail "mosquitto container failed to start"
+    fail "mosquitto not ready after 15s"
     docker compose logs mosquitto
     exit 1
 fi
@@ -45,21 +56,27 @@ fi
 # ── 3. Anonymous connect must be rejected ────────────────────────────────────
 info "Testing anonymous connection is rejected..."
 if docker run --rm --network host eclipse-mosquitto:2 \
-       mosquitto_pub -h localhost -p 1883 -t test -m x 2>&1 | grep -qi "refused\|not authorised\|error"; then
-    pass "Anonymous connection rejected"
+       mosquitto_pub -h localhost -p 1883 -t test -m x 2>/dev/null; then
+    fail "Anonymous connection SUCCEEDED — auth is broken"
 else
-    fail "Anonymous connection was NOT rejected — auth is broken"
+    pass "Anonymous connection rejected (exit code $?)"
 fi
 
-# ── 4. Authenticated round-trip ─────────────────────────────────────────────
+# ── 4. Authenticated round-trip ───────────────────────��─────────────────────
+# Use a retained message so the subscriber gets it regardless of timing.
 info "Testing authenticated round-trip..."
 docker run --rm --network host eclipse-mosquitto:2 \
     mosquitto_pub -h localhost -p 1883 -u esp32-bridge -P test_esp32_pass \
-    -t victron/selftest -m '{"ok":1}' 2>&1
+    -r -t victron/selftest -m '{"ok":1}'
 
 RECEIVED=$(docker run --rm --network host eclipse-mosquitto:2 \
     mosquitto_sub -h localhost -p 1883 -u decoder -P test_decoder_pass \
-    -t victron/selftest -C 1 -W 3 2>&1 || true)
+    -t victron/selftest -C 1 -W 5 2>&1 || true)
+
+# Clean up retained message
+docker run --rm --network host eclipse-mosquitto:2 \
+    mosquitto_pub -h localhost -p 1883 -u esp32-bridge -P test_esp32_pass \
+    -r -t victron/selftest -n 2>/dev/null || true
 
 if echo "$RECEIVED" | grep -q '"ok"'; then
     pass "Authenticated MQTT round-trip succeeded"

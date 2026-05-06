@@ -8,6 +8,7 @@ services:
       sh -c "
         mosquitto_passwd -b -c /mosquitto/config/passwd esp32-bridge $$MQTT_ESP32_PASS &&
         mosquitto_passwd -b /mosquitto/config/passwd decoder $$MQTT_DECODER_PASS &&
+        chmod 644 /mosquitto/config/passwd &&
         exec mosquitto -c /mosquitto/config/mosquitto.conf
       "
     ports:
