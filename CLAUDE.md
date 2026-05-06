@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-Phase 1 (ESP32 firmware + MQTT broker) is **complete and verified** — real Victron BLE payloads flowing to production MQTT at ***REDACTED_SERVER_IP***. Phases 2–6 are not yet started.
+Phase 1 (ESP32 firmware + MQTT broker) is **complete and verified** — real Victron BLE payloads flowing to production MQTT at ***REDACTED_SERVER_IP***. Phase 2 (server infrastructure) is **complete and verified** — 4 InfluxDB buckets + 4 downsampling tasks confirmed. Phase 3 (BLE decoder) is **built**; run `./test_phase3.sh` on the Linux server. Phases 4–6 not started.
 
 The full system design lives in `victron-system-design.md` (v4.3). That document is the authoritative specification.
 
@@ -107,7 +107,7 @@ Internet → nginx (8443 TLS) → oauth2-proxy (Google OAuth) → solar-api (Fas
 The design doc defines 6 isolated phases, each with acceptance criteria:
 1. ✅ ESP32 firmware (`esp32/victron-bridge.yaml` via ESPHome) — real payloads flowing
 2. ✅ Server infrastructure (Docker, Mosquitto, InfluxDB with downsampling tasks) — 4 buckets + 4 tasks verified
-3. BLE decoder + device discovery (`decoder/`)
+3. 🔄 BLE decoder + device discovery (`decoder/`) — built, needs `./test_phase3.sh` + device discovery with real hardware
 4. API service (`api/main.py`, bucket stitching, timezone-aware `/daily`)
 5. Dashboard UI (`api/static/index.html`, animated SVG energy flow)
 6. Auth + TLS (nginx, oauth2-proxy, Let's Encrypt DNS-01)
@@ -119,6 +119,16 @@ The design doc defines 6 isolated phases, each with acceptance criteria:
 **Mosquitto passwd persistence:** eclipse-mosquitto declares `/mosquitto/config` as a Docker VOLUME so the passwd file survives container recreations. The entrypoint does `rm -f /mosquitto/config/passwd` before recreating it — this is intentional and prevents stale credentials from a previous run blocking startup.
 
 **Bash arithmetic gotcha in test scripts:** `((N++))` returns exit code 1 when N=0. Use `N=$((N+1))` in test scripts that use `set -e`.
+
+**Phase 3 decoder design:** `decoder.py` supports two MQTT payload formats on `victron/raw`:
+- Production: `{"mac": "...", "data": "hexbytes"}` — decrypted via `victron-ble` library using the device key from `config/devices.json`
+- Test: `{"mac": "...", "raw": {field: value}}` — pre-decoded values written directly to InfluxDB, no decryption needed
+
+The `raw` format is used in `decoder/fixtures/victron_sample.jsonl` so the isolated test works without real Victron hardware. The `data` format is what the ESP32 actually sends. To test real decryption requires real Victron devices with keys populated in `config/devices.json`.
+
+**victron-ble library usage:** `detect_device_type(raw_bytes)` takes manufacturer data bytes WITHOUT the Victron manufacturer ID prefix (0x02E1) — this matches what the ESP32 publishes (ESPHome's `get_manufacturer_datas()` strips the company identifier). Device class constructor takes the key as a hex string: `SolarCharger("aabb...").parse(raw_bytes)`.
+
+**Decoder retry buffer:** uses a `threading.Condition`-guarded `collections.deque(maxlen=500)` — deque auto-evicts oldest when full. A writer thread drains it with exponential-backoff retries [1, 2, 4, 8, 16s]. MQTT callbacks never block. This handles InfluxDB outages up to ~2.5 minutes without data loss.
 
 Each phase is test-isolated using a dedicated `victron_test` InfluxDB bucket, fixture replay, and the `docker-compose.test.yml` override.
 

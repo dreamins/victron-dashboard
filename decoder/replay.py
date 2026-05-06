@@ -16,6 +16,8 @@ def main():
     parser.add_argument("--password", default="test_esp32_pass")
     parser.add_argument("--rate", type=float, default=3.0, help="Messages/second across all devices")
     parser.add_argument("--loop", action="store_true", help="Loop fixture indefinitely")
+    parser.add_argument("--duration", type=float, default=0,
+                        help="Stop after N seconds (0 = no limit; implies --loop)")
     parser.add_argument("--fixture", default="decoder/fixtures/victron_sample.jsonl")
     args = parser.parse_args()
 
@@ -53,15 +55,24 @@ def main():
 
     interval = 1.0 / args.rate
     total = 0
+    deadline = time.time() + args.duration if args.duration > 0 else None
+    loop = args.loop or args.duration > 0
 
     try:
         while True:
             for msg in messages:
-                client.publish("victron/raw", json.dumps(msg)).wait_for_publish()
+                if deadline and time.time() >= deadline:
+                    break
+                payload = json.dumps(msg)
+                mac = msg.get("mac", "?")
+                size = len(msg.get("data", "")) // 2 if "data" in msg else "-"
+                client.publish("victron/raw", payload).wait_for_publish()
                 total += 1
-                print(f"[{total}] {msg['mac']}  {len(msg['data']) // 2}B", flush=True)
+                print(f"[{total}] {mac}  {size}B", flush=True)
                 time.sleep(interval)
-            if not args.loop:
+            if deadline and time.time() >= deadline:
+                break
+            if not loop:
                 break
     except KeyboardInterrupt:
         pass

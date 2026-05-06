@@ -9,6 +9,7 @@ services:
   ble-decoder:
     volumes:
       - ./decoder/fixtures/devices_fixture.json:/app/devices.json:ro
+      - ./decoder/fixtures:/app/fixtures:ro
     environment:
       - MQTT_PASSWORD=test_decoder_pass
       - INFLUX_BUCKET=victron_test

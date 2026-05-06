@@ -177,7 +177,72 @@ phase2() {
 
     ok "Phase 2 complete — run ./test_phase2.sh to verify"
 }
-phase3() { header "Phase 3 — BLE Decoder";          die "Not yet implemented. See victron-system-design.md §12 Phase 3."; }
+phase3() {
+    header "Phase 3 — BLE Decoder"
+
+    command -v docker &>/dev/null || die "docker not found. Install Docker and re-run."
+    [[ -f .env ]] || die ".env not found. Run ./setup.sh 2 first."
+    grep -q "^INFLUXDB_TOKEN=" .env || die "InfluxDB not configured. Run ./setup.sh 2 first."
+
+    ok "Building ble-decoder image..."
+    docker compose build ble-decoder
+
+    ok "Starting mosquitto, influxdb, and ble-decoder..."
+    docker compose up -d mosquitto influxdb ble-decoder
+
+    ok "Waiting for InfluxDB to be ready..."
+    for i in $(seq 1 40); do
+        docker compose exec -T influxdb influx ping &>/dev/null && break
+        sleep 3
+    done
+    docker compose exec -T influxdb influx ping &>/dev/null || die "InfluxDB did not become ready"
+
+    ok "Waiting for decoder to connect to MQTT..."
+    for i in $(seq 1 20); do
+        docker compose logs ble-decoder 2>/dev/null | grep -q "MQTT connected" && break
+        sleep 2
+    done
+
+    if docker compose logs ble-decoder 2>/dev/null | grep -q "MQTT connected"; then
+        ok "Decoder connected to MQTT"
+    else
+        warn "Decoder has not connected yet — check: docker compose logs ble-decoder"
+    fi
+
+    # Device discovery guidance
+    MQTT_BIND_IP=$(grep MQTT_BIND_IP .env 2>/dev/null | cut -d= -f2 || echo "<server-LAN-IP>")
+    DECODER_PASS=$(grep MQTT_DECODER_PASS .env 2>/dev/null | cut -d= -f2 || echo "<see .env>")
+
+    if [[ ! -f config/devices.json ]]; then
+        warn "config/devices.json not found — device keys not yet configured"
+        cat <<EOF
+
+${BOLD}Device Discovery (requires ESP32 near Victron devices):${NC}
+
+  python3 decoder/discover.py \\
+    --broker ${MQTT_BIND_IP} \\
+    --username decoder \\
+    --password ${DECODER_PASS} \\
+    --output config/devices.json
+
+The script will:
+  1. Listen to victron/raw for Victron advertisement MACs
+  2. Identify each device type (SolarCharger, BatterySense, etc.)
+  3. Prompt you for a label and the encryption key from VictronConnect
+
+After saving config/devices.json, restart the decoder:
+  docker compose restart ble-decoder
+
+EOF
+    else
+        DEVICE_COUNT=$(python3 -c "import json; d=json.load(open('config/devices.json')); print(len(d.get('devices',[])))" 2>/dev/null || echo "?")
+        ok "config/devices.json found (${DEVICE_COUNT} device(s) configured)"
+        ok "Restarting decoder to pick up device config..."
+        docker compose restart ble-decoder
+    fi
+
+    ok "Phase 3 setup complete — run ./test_phase3.sh to verify"
+}
 phase4() { header "Phase 4 — API Service";           die "Not yet implemented. See victron-system-design.md §12 Phase 4."; }
 phase5() { header "Phase 5 — Dashboard UI";          die "Not yet implemented. See victron-system-design.md §12 Phase 5."; }
 phase6() { header "Phase 6 — Auth + TLS";            die "Not yet implemented. See victron-system-design.md §12 Phase 6."; }
