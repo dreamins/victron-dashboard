@@ -44,7 +44,8 @@ FIELD_GETTERS = [
     ("load_power",      "get_external_device_load"),     # was get_load_power — wrong name
     ("charge_state",    "get_charge_state"),
     ("charger_error",   "get_charger_error"),
-    # BatterySenseData methods
+    # BatterySenseData methods (Smart Battery Sense uses get_voltage, not get_battery_voltage)
+    ("battery_voltage", "get_voltage"),
     ("temperature",     "get_temperature"),
     # Methods that may exist on other device classes; silently skipped if absent
     ("pv_voltage",      "get_pv_voltage"),

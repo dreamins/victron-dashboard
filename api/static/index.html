@@ -125,9 +125,9 @@ header {
 .nl { fill:var(--node-label); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; }
 .nv { fill:var(--node-val); font-size:14px; font-weight:700; }
 .nbig { font-size:20px; font-weight:800; }
-@keyframes dash { to { stroke-dashoffset:-40; } }
+@keyframes dash { to { stroke-dashoffset:-20; } }
 .fl { fill:none; stroke:var(--dim); stroke-width:3; stroke-linecap:round; }
-.fl-active { stroke-dasharray:8 12; animation:dash 2s linear infinite; }
+.fl-active { stroke-dasharray:6 14; }
 
 /* ── Cards ───────────────────────────────────────────────────────────── */
 #cards {
@@ -230,7 +230,7 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
             <stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#f59e0b"/>
           </linearGradient>
           <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feComposite in="SourceGraphic" in2="b" operator="over"/></filter>
-          <clipPath id="batt-clip"><rect x="136" y="256" width="200" height="56" rx="28"/></clipPath>
+          <clipPath id="batt-clip"><rect x="154" y="254" width="192" height="74" rx="7"/></clipPath>
         </defs>
 
         <!-- PV Input Nodes — labels updated from JS -->
@@ -265,15 +265,26 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <text id="mppt2-status-txt" class="nl" x="400" y="153" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(1)">—</text>
         <text class="nv nbig" id="mppt2-flow-val" x="400" y="184" text-anchor="middle" style="cursor:pointer" onclick="switchTab(1)">—</text>
 
-        <!-- Battery Capsule — clickable → Battery tab -->
-        <rect class="nb" x="128" y="248" width="216" height="68" rx="34" style="cursor:pointer" onclick="switchTab(2)"/>
-        <rect x="342" y="266" width="14" height="30" rx="7" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1"/>
-        <clipPath id="batt-clip"><rect x="134" y="254" width="202" height="56" rx="28"/></clipPath>
-        <rect id="batt-fill-bar" x="134" y="254" width="0" height="56" fill="url(#g-batt-hi)" opacity="0.55" clip-path="url(#batt-clip)"/>
-        <text class="nl" x="236" y="267" text-anchor="middle" style="cursor:pointer" onclick="switchTab(2)">Battery</text>
-        <text class="nv" id="flow-batt-v" x="198" y="296" text-anchor="middle" style="font-size:20px;font-weight:800;fill:#00f2ff;cursor:pointer" onclick="switchTab(2)">—</text>
-        <text id="flow-batt-soc" style="fill:#9ca3af;font-size:12px;font-weight:700;cursor:pointer" x="296" y="286" text-anchor="middle" onclick="switchTab(2)">—</text>
-        <text class="nv" id="flow-batt-t" x="296" y="303" text-anchor="middle" style="font-size:13px;fill:#9ca3af;cursor:pointer" onclick="switchTab(2)">—</text>
+        <!-- Battery: LiFePO4 rectangular pack (LiTime style) -->
+        <!-- Main body -->
+        <rect class="nb" x="150" y="248" width="200" height="84" rx="10" style="cursor:pointer" onclick="switchTab(2)"/>
+        <!-- Cell dividers — 4S pack visual -->
+        <line x1="200" y1="252" x2="200" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
+        <line x1="250" y1="252" x2="250" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
+        <line x1="300" y1="252" x2="300" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
+        <!-- Negative terminal (-) bolt on top-left -->
+        <rect x="162" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
+        <text x="172" y="248" text-anchor="middle" style="fill:var(--sub);font-size:10px;font-weight:900">−</text>
+        <!-- Positive terminal (+) bolt on top-right -->
+        <rect x="318" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
+        <text x="328" y="248" text-anchor="middle" style="fill:#ef4444;font-size:10px;font-weight:900">+</text>
+        <!-- Charge fill bar -->
+        <rect id="batt-fill-bar" x="154" y="252" width="0" height="76" fill="url(#g-batt-hi)" opacity="0.45" clip-path="url(#batt-clip)"/>
+        <!-- Labels -->
+        <text class="nl" x="250" y="266" text-anchor="middle" style="cursor:pointer;font-size:9px;letter-spacing:0.5px" onclick="switchTab(2)">LiFePO₄ · Battery</text>
+        <text class="nv" id="flow-batt-v" x="208" y="300" text-anchor="middle" style="font-size:19px;font-weight:800;fill:#00f2ff;cursor:pointer" onclick="switchTab(2)">—</text>
+        <text id="flow-batt-soc" style="fill:#9ca3af;font-size:12px;font-weight:700;cursor:pointer" x="308" y="290" text-anchor="middle" onclick="switchTab(2)">—</text>
+        <text class="nv" id="flow-batt-t" x="308" y="308" text-anchor="middle" style="font-size:12px;fill:#9ca3af;cursor:pointer" onclick="switchTab(2)">—</text>
 
         <!-- Load nodes — hidden until JS shows them -->
         <g id="mppt1-load-grp" style="display:none">
@@ -290,8 +301,8 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <!-- Flow paths -->
         <path id="path-pv1"         class="fl" d="M100,76  L100,112"/>
         <path id="path-pv2"         class="fl" d="M400,76  L400,112"/>
-        <path id="path-mppt1"       class="fl" d="M100,198 Q100,282 128,282"/>
-        <path id="path-mppt2"       class="fl" d="M400,198 Q400,282 344,282"/>
+        <path id="path-mppt1"       class="fl" d="M100,198 Q100,290 150,290"/>
+        <path id="path-mppt2"       class="fl" d="M400,198 Q400,290 350,290"/>
         <path id="path-mppt1-load"  class="fl" d="M100,198 L66,262"  style="display:none"/>
         <path id="path-mppt2-load"  class="fl" d="M400,198 L434,262" style="display:none"/>
       </svg>
@@ -507,7 +518,7 @@ function renderFlow(){
     setText('flow-batt-soc', S.bsoc.toFixed(0)+'%');
     const bar=document.getElementById('batt-fill-bar');
     if(bar){
-      bar.setAttribute('width', String(S.bsoc/100*202));
+      bar.setAttribute('width', String(S.bsoc/100*192));
       bar.setAttribute('fill', S.bsoc<20?'url(#g-batt-lo)':'url(#g-batt-hi)');
     }
   } else {
@@ -521,10 +532,10 @@ function renderFlow(){
   setLoadNode(1,m1); setLoadNode(2,m2);
 
   const pv1=pvWatts(m1), pv2=pvWatts(m2);
-  updatePath('path-pv1',   pv1??0,                          '#ffcc33',300);
-  updatePath('path-pv2',   pv2??0,                          '#ffcc33',300);
-  updatePath('path-mppt1', m1?.fields?.charge_current??0,   '#10b981',20);
-  updatePath('path-mppt2', m2?.fields?.charge_current??0,   '#10b981',20);
+  updatePath('path-pv1',   pv1??0,                          '#ffcc33', 50);   // max 50W panel
+  updatePath('path-pv2',   pv2??0,                          '#ffcc33', 50);   // max 50W panel
+  updatePath('path-mppt1', m1?.fields?.charge_current??0,   '#00f2ff',  4);   // max 4A
+  updatePath('path-mppt2', m2?.fields?.charge_current??0,   '#00f2ff',  4);   // max 4A
 }
 
 function pvWatts(m){
@@ -537,7 +548,7 @@ function pvWatts(m){
 
 function setPvNode(idx,m){
   const w=pvWatts(m);
-  setText(`flow-pv${idx}-val`, w!=null ? w.toFixed(0)+' W' : '—');
+  setText(`flow-pv${idx}-val`, w!=null ? fmtW(w) : '—');
   const box=document.getElementById(`pv${idx}-box`);
   if(box){
     box.style.stroke = (w!=null&&w>5) ? 'rgba(255,204,51,0.55)' : '';
@@ -575,14 +586,18 @@ function updateMpptNode(idx,d){
   setText(`mppt${idx}-flow-val`, big);
 }
 
-function updatePath(id,val,col,max){
-  const p=document.getElementById(id);if(!p)return;
-  if(val>0.5){
-    p.classList.add('fl-active');p.style.stroke=col;
-    p.style.animationDuration=Math.max(0.4,3-(val/max)*2.5)+'s';
+function updatePath(id,val,col,maxVal){
+  const p=document.getElementById(id); if(!p) return;
+  if(val>0.05){
+    const ratio=Math.min(val/maxVal,1);
+    const dur=(Math.max(0.5, 3.0-ratio*2.5)).toFixed(2);
+    p.classList.add('fl-active');
+    p.style.stroke=col;
     p.style.filter='url(#glow)';
+    p.style.animation=`dash ${dur}s linear infinite`;
   }else{
-    p.classList.remove('fl-active');p.style.stroke='var(--dim)';p.style.filter='none';
+    p.classList.remove('fl-active');
+    p.style.stroke=''; p.style.filter=''; p.style.animation='';
   }
 }
 

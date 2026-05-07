@@ -54,6 +54,19 @@ class TestFieldGetterNames:
     def test_battery_sense_has_temperature(self):
         assert hasattr(BatterySenseData, "get_temperature")
 
+    def test_battery_sense_has_voltage(self):
+        assert hasattr(BatterySenseData, "get_voltage"), (
+            "BatterySense uses get_voltage(), not get_battery_voltage()"
+        )
+
+    def test_battery_sense_voltage_getter_in_field_getters(self):
+        """Ensure battery_voltage <- get_voltage entry exists for BatterySense."""
+        entries = [(f, m) for f, m in FIELD_GETTERS if f == "battery_voltage"]
+        methods = [m for _, m in entries]
+        assert "get_voltage" in methods, (
+            "FIELD_GETTERS must include ('battery_voltage','get_voltage') for BatterySense"
+        )
+
 
 # ── Real packet decoding (mppt_1, SmartSolar 75/10 rev2, captured 2026-05-07) ──
 
