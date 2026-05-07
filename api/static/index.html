@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Solar Monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #e6edf3; --muted: #8b949e;
+  --green: #2ecc71; --red: #e74c3c; --amber: #f39c12;
+  --blue: #3498db; --yellow: #f1c40f; --purple: #9b59b6;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: ui-monospace,monospace; font-size: 13px; }
+a { color: var(--blue); }
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10;
+}
+.header-left { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: bold; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+#last-update { color: var(--muted); font-size: 11px; }
+.pill { padding: 2px 8px; border-radius: 10px; font-size: 11px; background: var(--border); }
+.pill.online  { background: #1a3a2a; color: var(--green); border: 1px solid var(--green); }
+.pill.offline { background: #3a1a1a; color: var(--muted); border: 1px solid var(--border); }
+
+/* ── Bridge banner ───────────────────────────────────────────────────────── */
+#bridge-banner {
+  background: #3a1a1a; color: var(--red); border-bottom: 1px solid var(--red);
+  text-align: center; padding: 8px; font-weight: bold; letter-spacing: 0.5px;
+}
+#bridge-banner.hidden { display: none; }
+
+/* ── Flow diagram ────────────────────────────────────────────────────────── */
+#flow { display: flex; justify-content: center; padding: 16px 20px 8px; }
+#flow svg { width: 100%; max-width: 600px; }
+
+.node-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; rx: 6; }
+.node-label { fill: var(--muted); font-size: 11px; font-family: ui-monospace,monospace; }
+.node-value { fill: var(--text); font-size: 12px; font-family: ui-monospace,monospace; font-weight: bold; }
+.node-big   { fill: var(--text); font-size: 14px; font-family: ui-monospace,monospace; font-weight: bold; }
+.badge-rect { rx: 3; }
+.badge-text { fill: #fff; font-size: 10px; font-family: ui-monospace,monospace; font-weight: bold; }
+
+@keyframes dash { to { stroke-dashoffset: -15; } }
+.flow-line { fill: none; stroke: #2a3a2a; stroke-width: 2.5; stroke-linecap: round; }
+
+.bulb-glow  { fill: var(--amber); opacity: 0; }
+.bulb-globe { fill: none; stroke: #555; stroke-width: 2; }
+.bulb-base  { fill: #444; }
+.bulb-cap   { stroke: #555; stroke-width: 1.5; }
+.bulb-label { fill: var(--muted); font-size: 11px; font-family: ui-monospace,monospace; }
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+#cards {
+  display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+  gap: 12px; padding: 8px 20px 16px; max-width: 900px; margin: 0 auto;
+}
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; cursor: pointer; transition: border-color .2s;
+}
+.card:hover { border-color: var(--blue); }
+.card.offline-card { border-color: var(--amber); opacity: .85; }
+.card.bridge-dim   { opacity: .4; pointer-events: none; }
+
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.card-title  { font-weight: bold; font-size: 13px; }
+.card-badge  { padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: bold; }
+.silent-badge { background: #3a2a00; color: var(--amber); border: 1px solid var(--amber); }
+
+.card-row { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid #1e2530; }
+.card-row:last-child { border-bottom: none; }
+.card-key   { color: var(--muted); }
+.card-val   { color: var(--text); font-weight: bold; }
+.card-val.dim { color: var(--muted); }
+.card-ts    { color: var(--muted); font-size: 10px; text-align: right; margin-top: 6px; }
+
+/* ── Detail tabs ─────────────────────────────────────────────────────────── */
+#detail { padding: 0 20px 20px; max-width: 900px; margin: 0 auto; }
+.tab-bar { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 0; }
+.tab-btn {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  padding: 8px 16px; font-family: ui-monospace,monospace; font-size: 12px; border-radius: 4px 4px 0 0;
+}
+.tab-btn:hover { color: var(--text); background: #1c2128; }
+.tab-btn.active { color: var(--text); background: var(--surface); border: 1px solid var(--border); border-bottom: 1px solid var(--surface); }
+
+.range-bar {
+  display: flex; gap: 4px; padding: 8px 0;
+  background: var(--surface); border: 1px solid var(--border); border-top: none;
+  padding: 6px 10px;
+}
+.range-btn {
+  background: none; border: 1px solid var(--border); color: var(--muted); cursor: pointer;
+  padding: 2px 8px; border-radius: 4px; font-family: ui-monospace,monospace; font-size: 11px;
+}
+.range-btn:hover { color: var(--text); border-color: var(--blue); }
+.range-btn.active { color: var(--text); background: #1c3a5a; border-color: var(--blue); }
+
+.chart-panel { display: none; background: var(--surface); border: 1px solid var(--border); border-top: none; padding: 12px; }
+.chart-panel.active { display: block; }
+.chart-wrap { position: relative; height: 200px; margin-bottom: 12px; }
+.chart-wrap:last-child { margin-bottom: 0; }
+.chart-title { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+
+.stats-grid { display: flex; gap: 20px; flex-wrap: wrap; padding: 8px 0; }
+.stat-item  { text-align: center; }
+.stat-val   { font-size: 20px; font-weight: bold; color: var(--yellow); }
+.stat-lbl   { color: var(--muted); font-size: 11px; }
+
+@media (max-width: 600px) {
+  header { flex-direction: column; gap: 6px; align-items: flex-start; }
+  #cards { grid-template-columns: 1fr; }
+  .tab-btn { padding: 6px 10px; font-size: 11px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <span id="day-icon">☀</span>
+    <span>Solar Monitor</span>
+  </div>
+  <div class="header-right">
+    <span id="status-pills"></span>
+    <span id="last-update">…</span>
+  </div>
+</header>
+
+<div id="bridge-banner" class="hidden">⚠ Bridge offline — no data from ESP32</div>
+
+<!-- Energy flow diagram -->
+<section id="flow">
+<svg viewBox="0 0 600 450" xmlns="http://www.w3.org/2000/svg">
+  <!-- PV panels -->
+  <rect class="node-box" x="40" y="10" width="155" height="56" rx="6"/>
+  <text class="node-label" x="117" y="26" text-anchor="middle">PV 1</text>
+  <text class="node-value" id="pv1-label" x="117" y="43" text-anchor="middle">—</text>
+  <text class="node-label" id="pv1-info" x="117" y="58" text-anchor="middle">— V / — W</text>
+
+  <rect class="node-box" x="405" y="10" width="155" height="56" rx="6"/>
+  <text class="node-label" x="482" y="26" text-anchor="middle">PV 2</text>
+  <text class="node-value" id="pv2-label" x="482" y="43" text-anchor="middle">—</text>
+  <text class="node-label" id="pv2-info" x="482" y="58" text-anchor="middle">— V / — W</text>
+
+  <!-- MPPT controllers -->
+  <rect class="node-box" x="40" y="110" width="155" height="88" rx="6"/>
+  <text class="node-label" id="mppt1-lbl" x="117" y="128" text-anchor="middle">MPPT 1</text>
+  <rect class="badge-rect" id="mppt1-badge-bg" x="72" y="135" width="90" height="18" rx="3" fill="#444"/>
+  <text class="badge-text" id="mppt1-badge" x="117" y="148" text-anchor="middle">OFF</text>
+  <text class="node-label" x="117" y="172" text-anchor="middle">charge current</text>
+  <text class="node-value" id="mppt1-current" x="117" y="190" text-anchor="middle">— A</text>
+
+  <rect class="node-box" x="405" y="110" width="155" height="88" rx="6"/>
+  <text class="node-label" id="mppt2-lbl" x="482" y="128" text-anchor="middle">MPPT 2</text>
+  <rect class="badge-rect" id="mppt2-badge-bg" x="437" y="135" width="90" height="18" rx="3" fill="#444"/>
+  <text class="badge-text" id="mppt2-badge" x="482" y="148" text-anchor="middle">OFF</text>
+  <text class="node-label" x="482" y="172" text-anchor="middle">charge current</text>
+  <text class="node-value" id="mppt2-current" x="482" y="190" text-anchor="middle">— A</text>
+
+  <!-- Battery -->
+  <rect class="node-box" x="185" y="250" width="230" height="75" rx="8"/>
+  <text class="node-label" x="300" y="268" text-anchor="middle">Battery Bank</text>
+  <text class="node-big"   id="batt-voltage" x="220" y="298" text-anchor="middle">—</text>
+  <text class="node-label" x="220" y="315" text-anchor="middle">voltage</text>
+  <text class="node-big"   id="batt-temp"    x="370" y="298" text-anchor="middle">—</text>
+  <text class="node-label" x="370" y="315" text-anchor="middle">temp</text>
+
+  <!-- Load bulb -->
+  <circle class="bulb-glow"  id="bulb-glow"  cx="300" cy="400" r="42"/>
+  <circle class="bulb-globe" id="bulb-globe" cx="300" cy="395" r="28"/>
+  <rect   class="bulb-base"  x="287" y="423" width="26" height="12" rx="2"/>
+  <line   class="bulb-cap"   x1="286" y1="423" x2="314" y2="423" stroke="#555" stroke-width="1.5"/>
+  <text class="bulb-label" id="load-watts" x="300" y="399" text-anchor="middle" dominant-baseline="middle">OFF</text>
+  <text class="node-label" x="300" y="443" text-anchor="middle">Load</text>
+
+  <!-- Flow lines -->
+  <line id="line-pv1-mppt1"  class="flow-line" x1="117" y1="66"  x2="117" y2="110"/>
+  <line id="line-pv2-mppt2"  class="flow-line" x1="482" y1="66"  x2="482" y2="110"/>
+  <line id="line-mppt1-batt" class="flow-line" x1="117" y1="198" x2="205" y2="250"/>
+  <line id="line-mppt2-batt" class="flow-line" x1="482" y1="198" x2="395" y2="250"/>
+  <line id="line-batt-load"  class="flow-line" x1="300" y1="325" x2="300" y2="367"/>
+</svg>
+</section>
+
+<!-- Device cards -->
+<section id="cards"></section>
+
+<!-- Detail tabs -->
+<section id="detail">
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab(0)">MPPT North</button>
+    <button class="tab-btn"        onclick="switchTab(1)">MPPT South</button>
+    <button class="tab-btn"        onclick="switchTab(2)">Battery</button>
+    <button class="tab-btn"        onclick="switchTab(3)">System</button>
+  </div>
+  <div class="range-bar" id="range-bar"></div>
+
+  <!-- Panel 0: MPPT North -->
+  <div id="panel-0" class="chart-panel active">
+    <div class="chart-title">PV Power (W)</div>
+    <div class="chart-wrap"><canvas id="chart-0-power"></canvas></div>
+    <div class="chart-title">Charge Current (A)</div>
+    <div class="chart-wrap"><canvas id="chart-0-current"></canvas></div>
+  </div>
+
+  <!-- Panel 1: MPPT South -->
+  <div id="panel-1" class="chart-panel">
+    <div class="chart-title">PV Power (W)</div>
+    <div class="chart-wrap"><canvas id="chart-1-power"></canvas></div>
+    <div class="chart-title">Charge Current (A)</div>
+    <div class="chart-wrap"><canvas id="chart-1-current"></canvas></div>
+  </div>
+
+  <!-- Panel 2: Battery -->
+  <div id="panel-2" class="chart-panel">
+    <div class="chart-title">Battery Voltage (V) — all sources</div>
+    <div class="chart-wrap"><canvas id="chart-2-voltage"></canvas></div>
+    <div class="chart-title">Temperature (°C)</div>
+    <div class="chart-wrap"><canvas id="chart-2-temp"></canvas></div>
+  </div>
+
+  <!-- Panel 3: System -->
+  <div id="panel-3" class="chart-panel">
+    <div class="chart-title">Combined PV Power (W)</div>
+    <div class="chart-wrap"><canvas id="chart-3-combined"></canvas></div>
+    <div class="chart-title">Daily Production (kWh) — last 30 days</div>
+    <div class="chart-wrap"><canvas id="chart-3-daily"></canvas></div>
+    <div class="stats-grid" id="system-stats"></div>
+  </div>
+</section>
+
+<script>
+// ── Config ─────────────────────────────────────────────────────────────────
+const LAT = 40.18;  // Yerevan, Armenia — adjust to your location
+const LON = 44.51;
+
+const RANGES = [
+  {label:'1h',  s:3600,      start:'-1h'},
+  {label:'6h',  s:21600,     start:'-6h'},
+  {label:'24h', s:86400,     start:'-24h'},
+  {label:'7d',  s:604800,    start:'-7d'},
+  {label:'30d', s:2592000,   start:'-30d'},
+  {label:'6m',  s:15552000,  start:'-180d'},
+  {label:'1y',  s:31536000,  start:'-365d'},
+  {label:'All', s:157680000, start:'-1825d'},
+];
+
+const CHARGE_STATE = {
+  0:['OFF','#555'],  1:['Low','#555'],  2:['FAULT','#e74c3c'],
+  3:['BULK','#3498db'],  4:['ABS','#f39c12'],  5:['FLOAT','#2ecc71'],
+  7:['EQ','#9b59b6'],
+};
+
+// ── State ───────────────────────────────────────────────────────────────────
+let S = {
+  current: {},         // id → {label, fields, ts}
+  devicesResp: [],     // from /api/v1/devices
+  bridgeOnline: true,
+  mptts: [],           // sorted MPPT device ids
+  bsense: null,        // battery sense device id
+  lastPollMs: null,
+  tab: 0,
+  range: '24h',
+};
+let charts = {};       // canvasId → Chart instance
+let chartsPending = false;
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function setText(id, v) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = v;
+}
+function fv(d, f, unit='', dp=1) {
+  if (!d || !(f in (d.fields||{})) || d.fields[f] == null) return '—';
+  const n = +d.fields[f];
+  return isNaN(n) ? '—' : n.toFixed(dp) + unit;
+}
+function relTime(isoStr) {
+  if (!isoStr) return '—';
+  const secs = Math.round((Date.now() - new Date(isoStr).getTime()) / 1000);
+  if (secs < 5)  return 'now';
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs/60)}m ago`;
+  return `${Math.floor(secs/3600)}h ago`;
+}
+function computeInterval(rangeSecs) {
+  const raw = Math.max(1, Math.ceil(rangeSecs / 500));
+  const steps = [1,2,5,10,15,30,60,120,300,600,900,1800,3600,7200,14400,28800,43200,86400];
+  const clean = steps.find(s => s >= raw) || 86400;
+  if (clean < 60) return `${clean}s`;
+  if (clean < 3600) return `${Math.round(clean/60)}m`;
+  if (clean < 86400) return `${Math.round(clean/3600)}h`;
+  return `${Math.round(clean/86400)}d`;
+}
+
+// ── Sunrise / sunset ────────────────────────────────────────────────────────
+function isDaytime() {
+  const now = new Date();
+  const d   = now.getTime() / 86400000 - 10957.5;
+  const L   = ((280.46 + 0.9856474 * d) % 360 + 360) % 360;
+  const g   = ((357.528 + 0.9856003 * d) % 360 + 360) % 360;
+  const lam = L + 1.915*Math.sin(g*Math.PI/180) + 0.02*Math.sin(2*g*Math.PI/180);
+  const sinDec = Math.sin(23.45*Math.PI/180) * Math.sin(lam*Math.PI/180);
+  const dec    = Math.asin(sinDec);
+  const cosH   = -Math.tan(LAT*Math.PI/180) * Math.tan(dec);
+  if (cosH > 1) return false;
+  if (cosH < -1) return true;
+  const H = Math.acos(cosH) * 180/Math.PI / 15;
+  const noon = 12 - LON/15;
+  const utcH = now.getUTCHours() + now.getUTCMinutes()/60 + now.getUTCSeconds()/3600;
+  return utcH >= noon - H && utcH <= noon + H;
+}
+
+// ── Device type detection ───────────────────────────────────────────────────
+function detectTypes() {
+  S.mptts = []; S.bsense = null;
+  for (const [id, d] of Object.entries(S.current)) {
+    if ('pv_power' in (d.fields||{})) S.mptts.push(id);
+    else if ('temperature' in (d.fields||{})) S.bsense = id;
+  }
+  S.mptts.sort();
+}
+
+// ── API calls ───────────────────────────────────────────────────────────────
+async function pollCurrent() {
+  try {
+    const [cur, dev] = await Promise.all([
+      fetch('/api/v1/current').then(r => r.ok ? r.json() : {}),
+      fetch('/api/v1/devices').then(r => r.ok ? r.json() : {bridge_online:false, devices:[]}),
+    ]);
+    // Merge — preserve last known values when fields are missing
+    for (const [id, d] of Object.entries(cur)) S.current[id] = d;
+    S.devicesResp  = dev.devices || [];
+    S.bridgeOnline = dev.bridge_online ?? false;
+    S.lastPollMs   = Date.now();
+  } catch {
+    S.bridgeOnline = false;
+  }
+  detectTypes();
+  render();
+}
+
+async function fetchHistory(device, field, rangeStart, interval) {
+  const url = `/api/v1/history?device=${encodeURIComponent(device)}`
+    + `&field=${field}&start=${rangeStart}&interval=${interval}`;
+  const r = await fetch(url);
+  return r.ok ? r.json() : {points:[]};
+}
+
+// ── Rendering ───────────────────────────────────────────────────────────────
+function render() {
+  document.getElementById('day-icon').textContent = isDaytime() ? '☀' : '🌙';
+
+  // Status pills
+  const pills = document.getElementById('status-pills');
+  pills.innerHTML = S.devicesResp.map(d =>
+    `<span class="pill ${d.online?'online':'offline'}">${d.label}</span>`
+  ).join(' ');
+
+  // Bridge banner
+  document.getElementById('bridge-banner').classList.toggle('hidden', S.bridgeOnline);
+
+  renderFlow();
+  renderCards();
+}
+
+function renderFlow() {
+  const m1 = S.mptts[0] ? S.current[S.mptts[0]] : null;
+  const m2 = S.mptts[1] ? S.current[S.mptts[1]] : null;
+  const bs = S.bsense    ? S.current[S.bsense]    : null;
+
+  // PV node text
+  setText('pv1-label', m1?.label || '—');
+  setText('pv1-info',  `${fv(m1,'pv_voltage','V')} / ${fv(m1,'pv_power','W',0)}`);
+  setText('pv2-label', m2?.label || '—');
+  setText('pv2-info',  `${fv(m2,'pv_voltage','V')} / ${fv(m2,'pv_power','W',0)}`);
+
+  // MPPT nodes
+  renderMpptNode('mppt1', m1);
+  renderMpptNode('mppt2', m2);
+
+  // Battery node
+  const battSrc = bs || m1;
+  setText('batt-voltage', fv(battSrc, 'battery_voltage', ' V'));
+  setText('batt-temp',    bs ? fv(bs, 'temperature', ' °C') : '—');
+
+  // Load bulb
+  const lw = (m1?.fields?.load_power||0) + (m2?.fields?.load_power||0);
+  const globe = document.getElementById('bulb-globe');
+  const glow  = document.getElementById('bulb-glow');
+  if (lw > 0.5) {
+    setText('load-watts', `${lw.toFixed(0)} W`);
+    globe.style.fill   = 'rgba(243,156,18,0.9)';
+    globe.style.stroke = '#f39c12';
+    glow.style.opacity = '0.2';
+  } else {
+    setText('load-watts', 'OFF');
+    globe.style.fill   = 'none';
+    globe.style.stroke = '#555';
+    glow.style.opacity = '0';
+  }
+
+  // Flow lines
+  setFlow('line-pv1-mppt1',  m1?.fields?.pv_power        || 0, '#f1c40f', 300);
+  setFlow('line-pv2-mppt2',  m2?.fields?.pv_power        || 0, '#f1c40f', 300);
+  setFlow('line-mppt1-batt', m1?.fields?.charge_current  || 0, '#2ecc71',  30);
+  setFlow('line-mppt2-batt', m2?.fields?.charge_current  || 0, '#2ecc71',  30);
+  setFlow('line-batt-load',  lw,                                '#e74c3c', 100);
+}
+
+function renderMpptNode(prefix, d) {
+  const cs = Math.round(d?.fields?.charge_state ?? 0);
+  const [label, color] = CHARGE_STATE[cs] || ['?','#444'];
+  const badge = document.getElementById(`${prefix}-badge`);
+  const badgeBg = document.getElementById(`${prefix}-badge-bg`);
+  if (badge)   badge.textContent = label;
+  if (badgeBg) badgeBg.setAttribute('fill', color);
+  setText(`${prefix}-lbl`, d?.label || (prefix === 'mppt1' ? 'MPPT 1' : 'MPPT 2'));
+  setText(`${prefix}-current`, fv(d, 'charge_current', ' A'));
+}
+
+function setFlow(id, power, colorOn, maxPower) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (power > 0.1) {
+    const frac = Math.min(1, power / maxPower);
+    const dur  = (3.5 - frac * 3.0).toFixed(2);
+    el.style.stroke          = colorOn;
+    el.style.strokeDasharray = '10 5';
+    el.style.animation       = `dash ${dur}s linear infinite`;
+  } else {
+    el.style.stroke          = '#2a3a2a';
+    el.style.strokeDasharray = '';
+    el.style.animation       = 'none';
+  }
+}
+
+function renderCards() {
+  const allDevs = [...S.mptts, ...(S.bsense ? [S.bsense] : [])];
+  const container = document.getElementById('cards');
+  container.innerHTML = '';
+
+  for (const id of allDevs) {
+    const d       = S.current[id] || {};
+    const devInfo = S.devicesResp.find(x => x.id === id);
+    const online  = devInfo?.online ?? false;
+    const isMppt  = S.mptts.includes(id);
+    const dim     = !S.bridgeOnline;
+
+    const card = document.createElement('div');
+    card.className = `card${online?'':' offline-card'}${dim?' bridge-dim':''}`;
+    card.innerHTML = isMppt ? mpptCardHTML(d, online, devInfo) : bsenseCardHTML(d, online, devInfo);
+    const tabIdx = Math.min(allDevs.indexOf(id), 3);
+    card.addEventListener('click', () => switchTab(tabIdx));
+    container.appendChild(card);
+  }
+}
+
+function mpptCardHTML(d, online, devInfo) {
+  const f = d.fields || {};
+  const cs = Math.round(f.charge_state ?? 0);
+  const [csLabel, csColor] = CHARGE_STATE[cs] || ['?','#444'];
+  const badgeStyle = `background:${csColor}22;color:${csColor};border:1px solid ${csColor};`;
+  const silentBadge = (!online && S.bridgeOnline)
+    ? '<span class="card-badge silent-badge">Sensor silent</span>' : '';
+  const loadW = f.load_power ?? 0;
+  const loadStr = loadW > 0 ? `ON (${loadW.toFixed(0)} W)` : 'OFF';
+  const errRow = (f.charger_error ?? 0) ? `<div class="card-row"><span class="card-key">error</span><span class="card-val" style="color:#e74c3c">${f.charger_error}</span></div>` : '';
+
+  return `
+    <div class="card-header">
+      <span class="card-title">${d.label||'MPPT'}</span>
+      <span style="display:flex;gap:4px;align-items:center">
+        ${silentBadge}
+        <span class="card-badge" style="${badgeStyle}">${csLabel}</span>
+      </span>
+    </div>
+    <div class="card-row"><span class="card-key">PV power</span>   <span class="card-val">${fv(d,'pv_power','W',0)}</span></div>
+    <div class="card-row"><span class="card-key">PV voltage</span> <span class="card-val">${fv(d,'pv_voltage','V')}</span></div>
+    <div class="card-row"><span class="card-key">charge I</span>   <span class="card-val">${fv(d,'charge_current','A')}</span></div>
+    <div class="card-row"><span class="card-key">batt V</span>     <span class="card-val">${fv(d,'battery_voltage','V')}</span></div>
+    <div class="card-row"><span class="card-key">yield today</span><span class="card-val">${fv(d,'yield_today','Wh',0)}</span></div>
+    <div class="card-row"><span class="card-key">yield total</span><span class="card-val">${fv(d,'yield_total','kWh',1)}</span></div>
+    <div class="card-row"><span class="card-key">load</span>       <span class="card-val">${loadStr}</span></div>
+    ${errRow}
+    <div class="card-ts">${devInfo ? relTime(devInfo.last_seen) : '—'}</div>`;
+}
+
+function bsenseCardHTML(d, online, devInfo) {
+  const silentBadge = (!online && S.bridgeOnline)
+    ? '<span class="card-badge silent-badge">Sensor silent</span>' : '';
+  return `
+    <div class="card-header">
+      <span class="card-title">${d.label||'Battery Sense'}</span>
+      ${silentBadge}
+    </div>
+    <div class="card-row"><span class="card-key">voltage</span>    <span class="card-val">${fv(d,'battery_voltage','V')}</span></div>
+    <div class="card-row"><span class="card-key">temperature</span><span class="card-val">${fv(d,'temperature','°C')}</span></div>
+    <div class="card-ts">${devInfo ? relTime(devInfo.last_seen) : '—'}</div>`;
+}
+
+// ── Tab / range switching ───────────────────────────────────────────────────
+function switchTab(idx) {
+  S.tab = idx;
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', i===idx));
+  document.querySelectorAll('.chart-panel').forEach((p,i) => p.classList.toggle('active', i===idx));
+  updateTabLabels();
+  if (!chartsPending) updateCharts();
+}
+
+function switchRange(label) {
+  S.range = label;
+  document.querySelectorAll('.range-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.range === label)
+  );
+  if (!chartsPending) updateCharts();
+}
+
+function updateTabLabels() {
+  const btns = document.querySelectorAll('.tab-btn');
+  if (btns[0] && S.mptts[0]) btns[0].textContent = S.current[S.mptts[0]]?.label || 'MPPT North';
+  if (btns[1] && S.mptts[1]) btns[1].textContent = S.current[S.mptts[1]]?.label || 'MPPT South';
+}
+
+// ── Chart helpers ───────────────────────────────────────────────────────────
+const CHART_DEFAULTS = {
+  responsive: true, maintainAspectRatio: false,
+  animation: false,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { type:'time', ticks:{color:'#8b949e',maxTicksLimit:8}, grid:{color:'#1e2530'} },
+    y: { ticks:{color:'#8b949e'}, grid:{color:'#1e2530'} },
+  },
+};
+
+function mkLine(canvasId, color, label) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return null;
+  if (charts[canvasId]) { charts[canvasId].destroy(); }
+  charts[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: { datasets: [{ label, data:[], borderColor:color, backgroundColor:color+'22',
+      borderWidth:1.5, pointRadius:0, fill:true, tension:0.1 }] },
+    options: { ...JSON.parse(JSON.stringify(CHART_DEFAULTS)),
+      plugins: { legend:{display:false} },
+      scales: {
+        x: { type:'time', ticks:{color:'#8b949e',maxTicksLimit:8}, grid:{color:'#1e2530'} },
+        y: { ticks:{color:'#8b949e'}, grid:{color:'#1e2530'},
+          title:{display:true, text:label, color:'#8b949e', font:{size:11}} }
+      }
+    },
+  });
+  return charts[canvasId];
+}
+
+function setLineData(chart, points) {
+  if (!chart) return;
+  chart.data.datasets[0].data = points.map(p => ({x: new Date(p.t), y: p.v}));
+  chart.update();
+}
+
+async function updateLineChart(canvasId, device, field, rangeStart, interval, color, label) {
+  const data = await fetchHistory(device, field, rangeStart, interval);
+  let chart = charts[canvasId];
+  if (!chart) chart = mkLine(canvasId, color, label);
+  setLineData(chart, data.points);
+}
+
+async function updateMultiLineChart(canvasId, entries, rangeStart, interval, title) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  if (charts[canvasId]) { charts[canvasId].destroy(); }
+
+  const COLORS = ['#3498db','#f39c12','#2ecc71'];
+  const datasets = [];
+  for (const [i, {device, label}] of entries.entries()) {
+    const data = await fetchHistory(device, 'battery_voltage', rangeStart, interval);
+    datasets.push({
+      label,
+      data: data.points.map(p => ({x:new Date(p.t), y:p.v})),
+      borderColor: COLORS[i],
+      borderWidth: i === 0 ? 2.5 : 1,
+      pointRadius: 0,
+      fill: false,
+      tension: 0.1,
+    });
+  }
+  charts[canvasId] = new Chart(ctx, {
+    type:'line',
+    data:{ datasets },
+    options:{
+      ...JSON.parse(JSON.stringify(CHART_DEFAULTS)),
+      plugins:{ legend:{display:true,labels:{color:'#8b949e',font:{size:11}}} },
+      scales:{
+        x:{type:'time',ticks:{color:'#8b949e',maxTicksLimit:8},grid:{color:'#1e2530'}},
+        y:{ticks:{color:'#8b949e'},grid:{color:'#1e2530'},
+          title:{display:true,text:'V',color:'#8b949e',font:{size:11}}}
+      }
+    },
+  });
+}
+
+async function updateDailyChart() {
+  const data = await fetch('/api/v1/daily?days=30').then(r => r.ok ? r.json() : {days:[]});
+  const dates = data.days.map(d => d.date);
+  const devSet = {};
+  for (const day of data.days) {
+    for (const [dev, val] of Object.entries(day.devices)) {
+      if (!devSet[dev]) devSet[dev] = new Array(dates.length).fill(0);
+      devSet[dev][dates.indexOf(day.date)] = +(val/1000).toFixed(3);
+    }
+  }
+  const COLORS = ['#f1c40f','#2ecc71','#3498db'];
+  const datasets = Object.entries(devSet).map(([dev, vals], i) => ({
+    label: S.current[dev]?.label || dev,
+    data: vals,
+    backgroundColor: COLORS[i%COLORS.length]+'99',
+    borderColor:     COLORS[i%COLORS.length],
+    borderWidth: 1,
+  }));
+
+  const ctx = document.getElementById('chart-3-daily');
+  if (!ctx) return;
+  if (charts['chart-3-daily']) charts['chart-3-daily'].destroy();
+  charts['chart-3-daily'] = new Chart(ctx, {
+    type:'bar',
+    data:{labels:dates, datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      scales:{
+        x:{stacked:true, ticks:{color:'#8b949e',maxTicksLimit:12}, grid:{color:'#1e2530'}},
+        y:{stacked:true, ticks:{color:'#8b949e'}, grid:{color:'#1e2530'},
+          title:{display:true,text:'kWh',color:'#8b949e',font:{size:11}}}
+      },
+      plugins:{ legend:{labels:{color:'#8b949e',font:{size:11}}} },
+    },
+  });
+
+  // Lifetime totals
+  const stats = document.getElementById('system-stats');
+  if (stats) {
+    const totals = {};
+    for (const [dev, vals] of Object.entries(devSet)) {
+      totals[dev] = vals.reduce((a,b)=>a+b, 0);
+    }
+    stats.innerHTML = Object.entries(totals).map(([dev,kwh]) => `
+      <div class="stat-item">
+        <div class="stat-val">${kwh.toFixed(1)} kWh</div>
+        <div class="stat-lbl">${S.current[dev]?.label||dev} (30d)</div>
+      </div>`).join('');
+  }
+}
+
+async function updateCombinedPowerChart(rangeStart, interval) {
+  const COLORS = ['#f1c40f','#f39c12'];
+  const datasets = [];
+  for (const [i, id] of S.mptts.entries()) {
+    const data = await fetchHistory(id, 'pv_power', rangeStart, interval);
+    datasets.push({
+      label: S.current[id]?.label || id,
+      data: data.points.map(p => ({x:new Date(p.t), y:p.v})),
+      borderColor: COLORS[i],
+      backgroundColor: COLORS[i]+'22',
+      borderWidth:1.5, pointRadius:0, fill:true, tension:0.1,
+    });
+  }
+  const ctx = document.getElementById('chart-3-combined');
+  if (!ctx) return;
+  if (charts['chart-3-combined']) charts['chart-3-combined'].destroy();
+  charts['chart-3-combined'] = new Chart(ctx, {
+    type:'line', data:{datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      scales:{
+        x:{type:'time',ticks:{color:'#8b949e',maxTicksLimit:8},grid:{color:'#1e2530'}},
+        y:{ticks:{color:'#8b949e'},grid:{color:'#1e2530'},
+          title:{display:true,text:'W',color:'#8b949e',font:{size:11}}}
+      },
+      plugins:{ legend:{labels:{color:'#8b949e',font:{size:11}}} },
+    },
+  });
+}
+
+// ── Main chart update dispatcher ────────────────────────────────────────────
+async function updateCharts() {
+  if (chartsPending) return;
+  chartsPending = true;
+  try {
+    const range = RANGES.find(r => r.label === S.range) || RANGES[2];
+    const interval = computeInterval(range.s);
+
+    if (S.tab === 0 || S.tab === 1) {
+      const id = S.mptts[S.tab];
+      if (!id) return;
+      await updateLineChart(`chart-${S.tab}-power`,   id, 'pv_power',       range.start, interval, '#f1c40f', 'PV Power (W)');
+      await updateLineChart(`chart-${S.tab}-current`, id, 'charge_current', range.start, interval, '#2ecc71', 'Charge I (A)');
+    } else if (S.tab === 2) {
+      const entries = [
+        ...(S.bsense ? [{device:S.bsense, label:S.current[S.bsense]?.label||'Batt Sense'}] : []),
+        ...S.mptts.map(id => ({device:id, label:S.current[id]?.label||id})),
+      ];
+      if (entries.length) await updateMultiLineChart('chart-2-voltage', entries, range.start, interval, 'V');
+      if (S.bsense) await updateLineChart('chart-2-temp', S.bsense, 'temperature', range.start, interval, '#e67e22', 'Temp (°C)');
+    } else if (S.tab === 3) {
+      await updateCombinedPowerChart(range.start, interval);
+      await updateDailyChart();
+    }
+  } finally {
+    chartsPending = false;
+  }
+}
+
+// ── Init ────────────────────────────────────────────────────────────────────
+(function init() {
+  // Build range bar
+  const rangeBar = document.getElementById('range-bar');
+  for (const r of RANGES) {
+    const btn = document.createElement('button');
+    btn.className = `range-btn${r.label === S.range ? ' active' : ''}`;
+    btn.textContent = r.label;
+    btn.dataset.range = r.label;
+    btn.addEventListener('click', () => switchRange(r.label));
+    rangeBar.appendChild(btn);
+  }
+
+  // Start polling
+  pollCurrent();
+  updateCharts();
+  setInterval(pollCurrent, 2000);
+  setInterval(updateCharts, 60000);
+
+  // Countdown ticker
+  setInterval(() => {
+    const el = document.getElementById('last-update');
+    if (!el) return;
+    if (!S.lastPollMs) { el.textContent = '…'; return; }
+    const s = Math.round((Date.now() - S.lastPollMs) / 1000);
+    el.textContent = `updated ${s}s ago`;
+  }, 1000);
+})();
+</script>
+</body>
+</html>

@@ -1,8 +1,10 @@
 import os
 import re
+import pathlib
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.staticfiles import StaticFiles
 from influxdb_client import InfluxDBClient
 
 INFLUX_URL = os.environ["INFLUX_URL"]
@@ -263,3 +265,8 @@ from(bucket: "{INFLUX_BUCKET}")
         by_date[date_str]["total"] += max_val
 
     return {"days": sorted(by_date.values(), key=lambda d: d["date"])}
+
+
+_STATIC = pathlib.Path(__file__).parent / "static"
+if _STATIC.exists():
+    app.mount("/", StaticFiles(directory=str(_STATIC), html=True), name="static")
