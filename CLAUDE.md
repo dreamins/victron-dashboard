@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-Phase 1 (ESP32 firmware + MQTT broker) is **complete and verified** — real Victron BLE payloads flowing to production MQTT at ***REDACTED_SERVER_IP***. Phase 2 (server infrastructure) is **complete and verified** — 4 InfluxDB buckets + 4 downsampling tasks confirmed. Phase 3 (BLE decoder) is **complete and verified** — all 3 real devices (mppt_2, mppt_1, battery_sense) decoding and writing to `victron` bucket at ~1/second; 8/8 isolated tests pass including InfluxDB outage resilience. Phases 4–6 not started.
+Phase 1 (ESP32 firmware + MQTT broker) is **complete and verified** — real Victron BLE payloads flowing to production MQTT at ***REDACTED_SERVER_IP***. Phase 2 (server infrastructure) is **complete and verified** — 4 InfluxDB buckets + 4 downsampling tasks confirmed. Phase 3 (BLE decoder) is **complete and verified**. Phase 4 (API service) is **complete and verified** — 22/22 tests pass; bucket stitching, MAX aggregation for yield fields, timezone-aware daily, bridge/device online logic all confirmed. — all 3 real devices (mppt_2, mppt_1, battery_sense) decoding and writing to `victron` bucket at ~1/second; 8/8 isolated tests pass including InfluxDB outage resilience. Phases 4–6 not started.
 
 The full system design lives in `victron-system-design.md` (v4.3). That document is the authoritative specification.
 
@@ -108,7 +108,7 @@ The design doc defines 6 isolated phases, each with acceptance criteria:
 1. ✅ ESP32 firmware (`esp32/victron-bridge.yaml` via ESPHome) — real payloads flowing
 2. ✅ Server infrastructure (Docker, Mosquitto, InfluxDB with downsampling tasks) — 4 buckets + 4 tasks verified
 3. ✅ BLE decoder + device discovery (`decoder/`) — 8/8 tests pass; real devices live in `victron` bucket
-4. API service (`api/main.py`, bucket stitching, timezone-aware `/daily`)
+4. ✅ API service (`api/main.py`, bucket stitching, timezone-aware `/daily`) — 22/22 tests pass
 5. Dashboard UI (`api/static/index.html`, animated SVG energy flow)
 6. Auth + TLS (nginx, oauth2-proxy, Let's Encrypt DNS-01)
 

@@ -17,3 +17,5 @@ services:
   solar-api:
     environment:
       - INFLUX_BUCKET=victron_test
+      - INFLUX_BUCKET_MEDIUM=victron_test
+      - INFLUX_BUCKET_HOURLY=victron_test
