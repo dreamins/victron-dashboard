@@ -267,7 +267,7 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 
         <!-- Battery Capsule — clickable → Battery tab -->
         <rect class="nb" x="128" y="248" width="216" height="68" rx="34" style="cursor:pointer" onclick="switchTab(2)"/>
-        <rect x="342" y="266" width="14" height="30" rx="7" fill="#1e293b" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+        <rect x="342" y="266" width="14" height="30" rx="7" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1"/>
         <clipPath id="batt-clip"><rect x="134" y="254" width="202" height="56" rx="28"/></clipPath>
         <rect id="batt-fill-bar" x="134" y="254" width="0" height="56" fill="url(#g-batt-hi)" opacity="0.55" clip-path="url(#batt-clip)"/>
         <text class="nl" x="236" y="267" text-anchor="middle" style="cursor:pointer" onclick="switchTab(2)">Battery</text>
@@ -317,7 +317,21 @@ const RANGES=[
   {l:'7d',s:604800,st:'-7d'},{l:'30d',s:2592000,st:'-30d'},{l:'All',s:31536000,st:'-365d'}
 ];
 const STATES={
-  0:['Sleep','#374151'],3:['Bulk','#3b82f6'],4:['Abs','#f59e0b'],5:['Float','#10b981']
+  0:['Not charging','#374151'],
+  1:['Low power',   '#374151'],
+  2:['Fault',       '#ef4444'],
+  3:['Bulk',        '#3b82f6'],
+  4:['Absorption',  '#f59e0b'],
+  5:['Float',       '#10b981'],
+  6:['Storage',     '#10b981'],
+  7:['Equalize',    '#a855f7'],
+  9:['Inverting',   '#6366f1'],
+  11:['Power supply','#0ea5e9'],
+  245:['Starting up','#9ca3af'],
+  246:['Rep. absorption','#f59e0b'],
+  247:['Reconditioning', '#a855f7'],
+  248:['BatterySafe',    '#10b981'],
+  252:['Ext. control',   '#6366f1'],
 };
 
 let S={
@@ -337,6 +351,18 @@ function fv(d,f,u='',dp=1){
   if(v==null||isNaN(v)) return '—';
   return v.toFixed(dp)+(u?' '+u:'');
 }
+function fmtW(v){
+  if(v==null||isNaN(v)) return '—';
+  if(Math.abs(v)>=1000) return (v/1000).toFixed(2)+' kW';
+  return v.toFixed(0)+' W';
+}
+function fmtWh(v){
+  if(v==null||isNaN(v)) return '—';
+  if(Math.abs(v)>=1000) return (v/1000).toFixed(2)+' kWh';
+  return v.toFixed(0)+' Wh';
+}
+function wTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(1)+' kW':v+' W'; }
+function whTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(2)+' kWh':v+' Wh'; }
 function setText(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
 
 function isLight(){ return document.body.classList.contains('light'); }
@@ -414,6 +440,7 @@ function buildTabDefs(){
           <div class="chart-card"><div class="chart-title">Solar Power</div><div class="chart-container"><canvas id="chart-${i}-p"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Charge Current</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Battery Voltage</div><div class="chart-container"><canvas id="chart-${i}-v"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">Load Power</div><div class="chart-container"><canvas id="chart-${i}-l"></canvas></div></div>
         </div>`;
       if(d.kind==='battery') return `
         <div id="panel-${i}" class="chart-panel ${active}">
@@ -577,14 +604,14 @@ function renderCards(){
     // ── MPPT card ──
     if(isM){
       const pvW=pvWatts(d);
-      // Hero: pv_power if present; "0 W" if Sleep; "—" if active but not in packet
-      const hNum = pvW!=null ? pvW.toFixed(0) : '—';
+      const hNum = pvW!=null ? fmtW(pvW) : '—';
+      const hUnit= '';  // fmtW already includes unit
       const hLbl = pvW==null && (d?.fields?.charge_state??0)!==0
-                 ? 'Solar — data not in current packet'
+                 ? 'Solar — not in current packet'
                  : 'Solar Power';
       const bv   = fv(d,'battery_voltage',' V',2);
-      const cc   = fv(d,'charge_current',' A');
-      const yt   = fv(d,'yield_today',' Wh',0);
+      const cc   = d?.fields?.charge_current!=null ? d.fields.charge_current.toFixed(2)+' A' : '—';
+      const yt   = fmtWh(d?.fields?.yield_today??null);
       const cs   = Math.round(d?.fields?.charge_state??0);
       const stLbl= (STATES[cs]||STATES[0])[0];
       return `<div class="card${!info?.online?' s-silent':''}${isActive?' active-tab':''}"
@@ -593,7 +620,6 @@ function renderCards(){
         <div class="c-label">${d.label} <span style="font-weight:400;opacity:0.6;font-size:9px">${stLbl}</span></div>
         <div class="c-val-group">
           <span class="c-hero-num" style="color:${accent}">${hNum}</span>
-          <span class="c-hero-unit">W</span>
         </div>
         <div class="c-hero-label">${hLbl}</div>
         <div class="c-grid">
@@ -657,15 +683,16 @@ async function updateCharts(){
 
   if(def.kind==='mppt'){
     const id=def.id;
-    await drawLine(`chart-${S.tab}-p`,id,'pv_power',       rng.st,iv,'#ffcc33',' W');
+    await drawLine(`chart-${S.tab}-p`,id,'pv_power',       rng.st,iv,'#ffcc33',wTick);
     await drawLine(`chart-${S.tab}-c`,id,'charge_current', rng.st,iv,'#10b981',' A');
     await drawLine(`chart-${S.tab}-v`,id,'battery_voltage',rng.st,iv,'#00f2ff',' V');
+    await drawLine(`chart-${S.tab}-l`,id,'load_power',     rng.st,iv,'#f97316',wTick);
   }else if(def.kind==='battery'){
     const voltIds=[...(S.bsense?[S.bsense]:[]),...S.mptts];
     await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,iv,' V');
     if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,iv,'#f97316','°C');
   }else{
-    await drawMulti(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,iv,' W');
+    await drawMulti(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,iv,wTick);
     await drawDailyBar(`chart-${S.tab}-bar`);
   }
 }
@@ -682,12 +709,13 @@ function grad(ctx2d,col){
 
 function baseOpts(unit){
   const c=chartColors();
+  const tickFn=typeof unit==='function' ? unit : v=>`${v}${unit}`;
   return{
     responsive:true, maintainAspectRatio:false,
     plugins:{legend:{display:false}},
     scales:{
       x:{type:'time',grid:{color:c.grid},ticks:{color:c.tick,font:{size:11},maxTicksLimit:8}},
-      y:{grid:{color:c.grid},ticks:{color:c.tick,font:{size:11},maxTicksLimit:6,callback:v=>`${v}${unit}`},border:{dash:[4,4]}}
+      y:{grid:{color:c.grid},ticks:{color:c.tick,font:{size:11},maxTicksLimit:6,callback:tickFn},border:{dash:[4,4]}}
     }
   };
 }
@@ -739,7 +767,7 @@ async function drawDailyBar(cid){
       labels:res.days.map(d=>d.date),
       datasets:S.mptts.map((id,i)=>({
         label:S.current[id]?.label||id,
-        data:res.days.map(d=>(d.devices[id]||0)/1000),
+        data:res.days.map(d=>(d.devices[id]||0)),
         backgroundColor:COLS[i%2], borderRadius:4
       }))
     },
@@ -748,7 +776,7 @@ async function drawDailyBar(cid){
       plugins:{legend:{display:true,labels:{color:c.leg,font:{size:11},boxWidth:12}}},
       scales:{
         x:{stacked:true,grid:{color:c.grid},ticks:{color:c.tick,font:{size:11}}},
-        y:{stacked:true,grid:{color:c.grid},ticks:{color:c.tick,font:{size:11},callback:v=>`${v}kWh`}}
+        y:{stacked:true,grid:{color:c.grid},ticks:{color:c.tick,font:{size:11},callback:whTick}}
       }
     }
   });

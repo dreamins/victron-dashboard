@@ -36,18 +36,21 @@ RETRY_DELAYS  = [1, 2, 4, 8, 16]
 
 
 FIELD_GETTERS = [
-    ("pv_power",        "get_pv_power"),
-    ("pv_voltage",      "get_pv_voltage"),
+    # victron-ble SolarChargerData methods (verified against library source)
+    ("pv_power",        "get_solar_power"),              # was get_pv_power — wrong name
     ("battery_voltage", "get_battery_voltage"),
-    ("battery_current", "get_battery_current"),
+    ("charge_current",  "get_battery_charging_current"), # was get_battery_current — wrong name
     ("yield_today",     "get_yield_today"),
-    ("yield_total",     "get_yield_total"),
-    ("load_current",    "get_load_current"),
-    ("load_power",      "get_load_power"),
-    ("load_state",      "get_load_state"),
+    ("load_power",      "get_external_device_load"),     # was get_load_power — wrong name
     ("charge_state",    "get_charge_state"),
     ("charger_error",   "get_charger_error"),
+    # BatterySenseData methods
     ("temperature",     "get_temperature"),
+    # Methods that may exist on other device classes; silently skipped if absent
+    ("pv_voltage",      "get_pv_voltage"),
+    ("yield_total",     "get_yield_total"),
+    ("load_current",    "get_load_current"),
+    ("load_state",      "get_load_state"),
     ("alarm",           "get_alarm"),
 ]
 
