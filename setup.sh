@@ -245,7 +245,256 @@ EOF
 }
 phase4() { header "Phase 4 — API Service";           die "Not yet implemented. See victron-system-design.md §12 Phase 4."; }
 phase5() { header "Phase 5 — Dashboard UI";          die "Not yet implemented. See victron-system-design.md §12 Phase 5."; }
-phase6() { header "Phase 6 — Auth + TLS";            die "Not yet implemented. See victron-system-design.md §12 Phase 6."; }
+phase6() {
+    header "Phase 6 — Auth + TLS"
+
+    command -v docker &>/dev/null || die "docker not found."
+    [[ -f .env ]] || die ".env not found. Run ./setup.sh 2 first."
+    grep -q "^INFLUXDB_TOKEN=" .env || die "InfluxDB not configured. Run ./setup.sh 2 first."
+
+    # ── Idempotency ──────────────────────────────────────────────────────────
+    if grep -q "^DOMAIN=" .env 2>/dev/null \
+    && grep -q "^GOOGLE_CLIENT_ID=" .env 2>/dev/null; then
+        warn "Phase 6 already configured in .env — skipping interactive setup"
+        warn "Remove DOMAIN / GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / OAUTH2_COOKIE_SECRET from .env to reconfigure."
+        ok "Restarting nginx and oauth2-proxy with existing config..."
+        docker compose up -d nginx oauth2-proxy
+        _p6_print_status
+        return
+    fi
+
+    # ── 1. Domain ────────────────────────────────────────────────────────────
+    header "Domain Name"
+    echo "Enter the fully-qualified domain name for the dashboard."
+    echo "A DNS A record must already point this name to your public IP."
+    echo "Example: solar.yourdomain.com"
+    echo ""
+    read -rp "Domain: " DOMAIN
+    [[ -n "$DOMAIN" ]] || die "Domain cannot be empty."
+    set_env DOMAIN "$DOMAIN"
+    ok "Domain set to: ${BOLD}${DOMAIN}${NC}"
+
+    # ── 2. TLS certificate (DNS-01) ──────────────────────────────────────────
+    header "Let's Encrypt Certificate — DNS-01 Challenge"
+    echo "certbot will prove ownership of ${DOMAIN} by creating a TXT record via your"
+    echo "DNS provider's API. No open port 80 is required."
+    echo ""
+
+    # Ensure certbot is present
+    if ! command -v certbot &>/dev/null; then
+        ok "Installing certbot..."
+        sudo apt-get update -q && sudo apt-get install -y -q certbot
+    fi
+
+    echo "Select your DNS provider:"
+    echo "  1) Cloudflare"
+    echo "  2) DigitalOcean"
+    echo "  3) Route 53 (AWS)"
+    echo "  4) Other / manual (you'll add the TXT record yourself)"
+    read -rp "Choice [1-4]: " DNS_CHOICE
+
+    EMAIL=$(git config --global user.email 2>/dev/null || true)
+    [[ -n "$EMAIL" ]] || read -rp "Email for Let's Encrypt expiry notices: " EMAIL
+
+    case "$DNS_CHOICE" in
+        1) _p6_certbot_cloudflare  "$DOMAIN" "$EMAIL" ;;
+        2) _p6_certbot_digitalocean "$DOMAIN" "$EMAIL" ;;
+        3) _p6_certbot_route53      "$DOMAIN" "$EMAIL" ;;
+        4) _p6_certbot_manual       "$DOMAIN" "$EMAIL" ;;
+        *) die "Invalid choice." ;;
+    esac
+
+    # ── 3. Certbot auto-renewal hook ─────────────────────────────────────────
+    _p6_setup_renewal_hook
+
+    # ── 4. Google OAuth credentials ──────────────────────────────────────────
+    header "Google OAuth 2.0 Credentials"
+    REDIRECT_URI="https://${DOMAIN}:8443/oauth2/callback"
+    cat <<EOF
+
+${BOLD}Step 1 — Create an OAuth 2.0 Client ID in Google Cloud Console:${NC}
+
+  URL: https://console.cloud.google.com/apis/credentials
+  → Create Credentials → OAuth 2.0 Client ID
+  → Application type: Web application
+  → Authorized redirect URIs → Add exactly:
+
+      ${BOLD}${REDIRECT_URI}${NC}
+
+  → Create → copy the Client ID and Client Secret.
+
+EOF
+    read -rp "Press Enter once you have the Client ID and Secret ready... " _
+    read -rp  "Google OAuth Client ID:     " GOOGLE_CLIENT_ID
+    read -rsp "Google OAuth Client Secret: " GOOGLE_CLIENT_SECRET
+    echo ""
+    [[ -n "$GOOGLE_CLIENT_ID" ]]     || die "Client ID cannot be empty."
+    [[ -n "$GOOGLE_CLIENT_SECRET" ]] || die "Client Secret cannot be empty."
+
+    OAUTH2_COOKIE_SECRET=$(openssl rand -hex 16)
+    set_env GOOGLE_CLIENT_ID     "$GOOGLE_CLIENT_ID"
+    set_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
+    set_env OAUTH2_COOKIE_SECRET "$OAUTH2_COOKIE_SECRET"
+    ok "OAuth credentials saved to .env"
+
+    # ── 5. Start nginx + oauth2-proxy ────────────────────────────────────────
+    header "Starting Auth + TLS Stack"
+    docker compose up -d nginx oauth2-proxy
+
+    ok "Waiting for nginx to become healthy..."
+    for i in $(seq 1 15); do
+        docker compose ps nginx 2>/dev/null | grep -q "running\|Up" && break
+        sleep 2
+    done
+
+    _p6_print_status
+}
+
+_p6_certbot_cloudflare() {
+    local domain="$1" email="$2"
+    apt list --installed 2>/dev/null | grep -q python3-certbot-dns-cloudflare \
+        || sudo apt-get install -y -q python3-certbot-dns-cloudflare
+
+    echo ""
+    echo "Create a Cloudflare API Token with permissions:"
+    echo "  Zone — Zone — Read"
+    echo "  Zone — DNS  — Edit"
+    echo "(Account → My Profile → API Tokens → Create Token)"
+    read -rsp "Cloudflare API Token: " CF_TOKEN
+    echo ""
+
+    local creds="/etc/letsencrypt/cloudflare.ini"
+    sudo bash -c "printf 'dns_cloudflare_api_token = %s\n' '${CF_TOKEN}' > ${creds}"
+    sudo chmod 600 "$creds"
+
+    sudo certbot certonly \
+        --dns-cloudflare \
+        --dns-cloudflare-credentials "$creds" \
+        --dns-cloudflare-propagation-seconds 30 \
+        -d "$domain" \
+        --non-interactive --agree-tos --email "$email"
+    ok "Certificate issued for ${domain}"
+}
+
+_p6_certbot_digitalocean() {
+    local domain="$1" email="$2"
+    apt list --installed 2>/dev/null | grep -q python3-certbot-dns-digitalocean \
+        || sudo apt-get install -y -q python3-certbot-dns-digitalocean
+
+    echo ""
+    echo "Create a DigitalOcean Personal Access Token (write scope) at:"
+    echo "  https://cloud.digitalocean.com/account/api/tokens"
+    read -rsp "DigitalOcean API Token: " DO_TOKEN
+    echo ""
+
+    local creds="/etc/letsencrypt/digitalocean.ini"
+    sudo bash -c "printf 'dns_digitalocean_token = %s\n' '${DO_TOKEN}' > ${creds}"
+    sudo chmod 600 "$creds"
+
+    sudo certbot certonly \
+        --dns-digitalocean \
+        --dns-digitalocean-credentials "$creds" \
+        --dns-digitalocean-propagation-seconds 30 \
+        -d "$domain" \
+        --non-interactive --agree-tos --email "$email"
+    ok "Certificate issued for ${domain}"
+}
+
+_p6_certbot_route53() {
+    local domain="$1" email="$2"
+    apt list --installed 2>/dev/null | grep -q python3-certbot-dns-route53 \
+        || sudo apt-get install -y -q python3-certbot-dns-route53
+
+    echo ""
+    echo "Route 53 DNS-01 uses your AWS credentials (~/.aws/credentials or env vars)."
+    echo "The IAM user needs: route53:ChangeResourceRecordSets, route53:ListHostedZones,"
+    echo "route53:GetChange on the hosted zone for ${domain}."
+    echo ""
+    read -rp "AWS_ACCESS_KEY_ID:     " AWS_ACCESS_KEY_ID
+    read -rsp "AWS_SECRET_ACCESS_KEY: " AWS_SECRET_ACCESS_KEY
+    echo ""
+
+    sudo AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+         AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+         certbot certonly \
+        --dns-route53 \
+        -d "$domain" \
+        --non-interactive --agree-tos --email "$email"
+    ok "Certificate issued for ${domain}"
+}
+
+_p6_certbot_manual() {
+    local domain="$1" email="$2"
+    cat <<EOF
+
+${BOLD}Manual DNS-01 challenge:${NC}
+certbot will print a TXT record value. Add it to your DNS, wait ~60 s for
+propagation, then press Enter to continue.
+
+EOF
+    sudo certbot certonly \
+        --manual \
+        --preferred-challenges dns \
+        -d "$domain" \
+        --agree-tos --email "$email"
+    ok "Certificate issued for ${domain}"
+}
+
+_p6_setup_renewal_hook() {
+    local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
+    local hook_file="${hook_dir}/reload-nginx.sh"
+    local project_dir
+    project_dir="$(pwd)"
+
+    sudo mkdir -p "$hook_dir"
+    sudo bash -c "cat > ${hook_file}" <<EOF
+#!/bin/bash
+cd ${project_dir}
+docker compose exec -T nginx nginx -s reload
+EOF
+    sudo chmod +x "$hook_file"
+    sudo systemctl enable --now certbot.timer 2>/dev/null || true
+    ok "Certbot renewal hook installed; certbot.timer enabled"
+}
+
+_p6_print_status() {
+    local DOMAIN
+    DOMAIN=$(grep "^DOMAIN=" .env 2>/dev/null | cut -d= -f2 || echo "<domain>")
+    local LAN_IP
+    LAN_IP=$(grep "^MQTT_BIND_IP=" .env 2>/dev/null | cut -d= -f2 || hostname -I | awk '{print $1}')
+
+    cat <<EOF
+
+${BOLD}── Router Port-Forward (Ubiquiti UniFi) ─────────────────────────────────────${NC}
+
+  Settings → Security (or Routing & Firewall) → Port Forwarding → Add rule:
+
+    Name:         victron-dashboard
+    Interface:    WAN
+    Port:         8443
+    Forward IP:   ${LAN_IP}
+    Forward Port: 8443
+    Protocol:     TCP
+
+${BOLD}── Verify ────────────────────────────────────────────────────────────────────${NC}
+
+  curl -sI https://${DOMAIN}:8443/health
+    → expect: HTTP/2 200 with Strict-Transport-Security header
+    → browser opens Google sign-in before reaching /health
+
+  systemctl status certbot.timer
+    → should show: active (waiting)
+
+${BOLD}── Dashboard ─────────────────────────────────────────────────────────────────${NC}
+
+  https://${DOMAIN}:8443/
+
+  Note: LAN access without auth is still available at http://${LAN_IP}:8080/
+  To restrict it: remove solar-api ports from docker-compose.yml and re-deploy.
+
+EOF
+    ok "Phase 6 setup complete."
+}
 
 # ─── Entry point ─────────────────────────────────────────────────────────────
 
