@@ -614,8 +614,7 @@ function setPvNode(idx,m){
   const w=pvWatts(m);
   setText(`flow-pv${idx}-val`, w!=null ? fmtW(w) : '—');
   const volt=m?.fields?.pv_voltage;
-  const cs=Math.round(m?.fields?.charge_state??0);
-  setText(`flow-pv${idx}-volt`, (volt!=null && cs!==0 && volt>=3) ? volt.toFixed(1)+' V' : '—');
+  setText(`flow-pv${idx}-volt`, volt!=null ? volt.toFixed(1)+' V' : '—');
   const box=document.getElementById(`pv${idx}-box`);
   if(box){
     box.style.stroke = (w!=null&&w>5) ? 'rgba(255,204,51,0.55)' : '';
@@ -625,13 +624,16 @@ function setPvNode(idx,m){
 
 function setLoadNode(idx,m){
   const lp=m?.fields?.load_power??0;
-  const has=lp>0.5||('load_power' in (m?.fields||{}));
+  const ls=m?.fields?.load_state;
+  // Show load node if output switch is on, or power > 0.5W, or field present
+  const has=ls===1||lp>0.5||('load_power' in (m?.fields||{}));
   const grp=document.getElementById(`mppt${idx}-load-grp`);
   const pth=document.getElementById(`path-mppt${idx}-load`);
   if(grp) grp.style.display=has?'':'none';
   if(pth) pth.style.display=has?'':'none';
   if(has){
-    setText(`mppt${idx}-load-val`, lp>0.5?lp.toFixed(0)+' W':'Off');
+    const lbl=lp>=1?lp.toFixed(0)+' W':ls===1?'<1 W':'Off';
+    setText(`mppt${idx}-load-val`, lbl);
     updatePath(`path-mppt${idx}-load`,lp,'#ff4b2b',100);
   }
 }
@@ -705,7 +707,7 @@ function renderCards(){
                  : 'Solar Power';
       const bv   = fv(d,'battery_voltage',' V',2);
       const cc   = d?.fields?.charge_current!=null ? d.fields.charge_current.toFixed(2)+' A' : '—';
-      const pvv  = (d?.fields?.pv_voltage!=null && cs!==0 && d.fields.pv_voltage>=3) ? d.fields.pv_voltage.toFixed(1)+' V' : '—';
+      const pvv  = d?.fields?.pv_voltage!=null ? d.fields.pv_voltage.toFixed(1)+' V' : '—';
       const yt   = fmtWh(d?.fields?.yield_today??null);
       const cs   = Math.round(d?.fields?.charge_state??0);
       const stLbl= (STATES[cs]||STATES[0])[0];
