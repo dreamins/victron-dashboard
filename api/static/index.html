@@ -648,12 +648,12 @@ function setLoadNode(idx,m){
     if(pth) pth.style.display='';
     updatePath(`path-mppt${idx}-load`,lp,'#ff4b2b',100);
   }else{
-    // Field present but below measurement floor — dim node, no flow path
+    // Field present but below measurement floor — dim node, static (no animation) line
     if(circle) circle.style.opacity='0.4';
     if(valEl)  valEl.style.fill='var(--sub)';
     setText(`mppt${idx}-load-val`,'~0 W');
     if(pth){
-      pth.style.display='none';
+      pth.style.display='';
       if(pth.classList.contains('fl-active')){
         pth.classList.remove('fl-active');
         pth.style.stroke=pth.style.filter=pth.style.animation='';
