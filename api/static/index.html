@@ -303,26 +303,28 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <text id="mppt2-status-txt" class="nl" x="400" y="153" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(1)">—</text>
         <text class="nv nbig" id="mppt2-flow-val" x="400" y="184" text-anchor="middle" style="cursor:pointer" onclick="switchTab(1)">—</text>
 
-        <!-- Battery: LiFePO4 rectangular pack (LiTime style) -->
-        <!-- Main body -->
-        <rect class="nb" x="150" y="248" width="200" height="84" rx="10" style="cursor:pointer" onclick="switchTab(2)"/>
-        <!-- Cell dividers — 4S pack visual -->
-        <line x1="200" y1="252" x2="200" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
-        <line x1="250" y1="252" x2="250" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
-        <line x1="300" y1="252" x2="300" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
-        <!-- Negative terminal (-) bolt on top-left -->
-        <rect x="162" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
-        <text x="172" y="248" text-anchor="middle" style="fill:var(--sub);font-size:10px;font-weight:900">−</text>
-        <!-- Positive terminal (+) bolt on top-right -->
-        <rect x="318" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
-        <text x="328" y="248" text-anchor="middle" style="fill:#ef4444;font-size:10px;font-weight:900">+</text>
-        <!-- Charge fill bar -->
-        <rect id="batt-fill-bar" x="154" y="252" width="0" height="76" fill="url(#g-batt-hi)" opacity="0.45" clip-path="url(#batt-clip)"/>
-        <!-- Labels -->
-        <text class="nl" x="250" y="266" text-anchor="middle" style="cursor:pointer;font-size:9px;letter-spacing:0.5px" onclick="switchTab(2)">LiFePO₄ · Battery</text>
-        <text class="nv" id="flow-batt-v" x="208" y="300" text-anchor="middle" style="font-size:19px;font-weight:800;fill:var(--batt);cursor:pointer" onclick="switchTab(2)">—</text>
-        <text id="flow-batt-soc" style="fill:var(--sub);font-size:12px;font-weight:700;cursor:pointer" x="308" y="290" text-anchor="middle" onclick="switchTab(2)">—</text>
-        <text class="nv" id="flow-batt-t" x="308" y="308" text-anchor="middle" style="font-size:12px;fill:#9ca3af;cursor:pointer" onclick="switchTab(2)">—</text>
+        <!-- Battery: LiFePO4 rectangular pack (LiTime style) — whole group is clickable -->
+        <g onclick="switchTab(2)" style="cursor:pointer">
+          <!-- Main body -->
+          <rect class="nb" x="150" y="248" width="200" height="84" rx="10"/>
+          <!-- Cell dividers — 4S pack visual -->
+          <line x1="200" y1="252" x2="200" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
+          <line x1="250" y1="252" x2="250" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
+          <line x1="300" y1="252" x2="300" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
+          <!-- Negative terminal (-) bolt on top-left -->
+          <rect x="162" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
+          <text x="172" y="248" text-anchor="middle" style="fill:var(--sub);font-size:10px;font-weight:900">−</text>
+          <!-- Positive terminal (+) bolt on top-right -->
+          <rect x="318" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
+          <text x="328" y="248" text-anchor="middle" style="fill:#ef4444;font-size:10px;font-weight:900">+</text>
+          <!-- Charge fill bar -->
+          <rect id="batt-fill-bar" x="154" y="252" width="0" height="76" fill="url(#g-batt-hi)" opacity="0.45" clip-path="url(#batt-clip)"/>
+          <!-- Labels -->
+          <text class="nl" x="250" y="266" text-anchor="middle" style="font-size:9px;letter-spacing:0.5px">LiFePO₄ · Battery</text>
+          <text class="nv" id="flow-batt-v" x="208" y="300" text-anchor="middle" style="font-size:19px;font-weight:800;fill:var(--batt)">—</text>
+          <text id="flow-batt-soc" style="fill:var(--sub);font-size:12px;font-weight:700" x="308" y="290" text-anchor="middle">—</text>
+          <text class="nv" id="flow-batt-t" x="308" y="308" text-anchor="middle" style="font-size:12px;fill:#9ca3af">—</text>
+        </g>
 
         <!-- Load nodes — hidden until JS shows them -->
         <g id="mppt1-load-grp" style="display:none">
