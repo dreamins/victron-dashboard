@@ -224,3 +224,22 @@ def test_daily_totals_positive():
     r = get("/api/v1/daily", days=3)
     for day in r.json()["days"]:
         assert day["total"] >= 0
+
+
+def test_daily_today_only_returns_single_date():
+    """today_only=true must return at most one calendar date (today)."""
+    r = get("/api/v1/daily", days=1, today_only=True, tz_offset=0)
+    assert r.status_code == 200
+    days = r.json()["days"]
+    assert len(days) <= 1, f"Expected at most 1 day, got {len(days)}: {[d['date'] for d in days]}"
+
+
+def test_daily_today_only_date_is_today():
+    """today_only=true result date must equal today's UTC date."""
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    r = get("/api/v1/daily", days=1, today_only=True, tz_offset=0)
+    assert r.status_code == 200
+    days = r.json()["days"]
+    if days:
+        assert days[0]["date"] == today, f"Expected date={today}, got {days[0]['date']}"

@@ -170,13 +170,21 @@ from(bucket: "{bucket}")
             "points": sorted(seen_t.values(), key=lambda p: p["t"]),
         }
 
-    def get_daily(self, days: int, offset: timedelta) -> List[Dict[str, Any]]:
+    def get_daily(self, days: int, offset: timedelta, today_only: bool = False) -> List[Dict[str, Any]]:
         # Use medium bucket (5-min resolution) for multi-day queries — 288× fewer rows
         # vs the raw bucket, and yield_today is MAX-aggregated so daily peak is preserved.
-        bucket = INFLUX_BUCKET_MEDIUM if days > 1 else INFLUX_BUCKET
+        if today_only:
+            now_local = datetime.now(timezone.utc) + offset
+            midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+            midnight_utc = midnight_local - offset
+            start_str = midnight_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+            bucket = INFLUX_BUCKET
+        else:
+            start_str = f"-{days}d"
+            bucket = INFLUX_BUCKET_MEDIUM if days > 1 else INFLUX_BUCKET
         q = f"""
 from(bucket: "{bucket}")
-  |> range(start: -{days}d)
+  |> range(start: {start_str})
   |> filter(fn: (r) => r._measurement == "solar" and r._field == "yield_today")
   |> group(columns: ["device"])
 """
@@ -246,9 +254,10 @@ def history(
 def daily(
     days: int = Query(default=30, ge=1, le=365),
     tz_offset: Optional[float] = Query(default=None),
+    today_only: bool = Query(default=False),
 ):
     tz_off = tz_offset if tz_offset is not None else TZ_OFFSET_HOURS
-    return {"days": repo.get_daily(days, timedelta(hours=tz_off))}
+    return {"days": repo.get_daily(days, timedelta(hours=tz_off), today_only=today_only)}
 
 
 _STATIC = pathlib.Path(__file__).parent / "static"

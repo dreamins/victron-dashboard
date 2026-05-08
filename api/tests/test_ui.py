@@ -373,6 +373,62 @@ class TestLoadPaths:
         assert "445,266" in d or "445" in d, f"Expected path to end near circle edge, got: {d}"
 
 
+class TestTodayYield:
+    """Daily bar chart sends today_only=true for 1-day ranges so only calendar-day data appears."""
+
+    def test_today_only_param_sent_for_1h_range(self, page: Page, static_server: str):
+        page.set_viewport_size({"width": 1280, "height": 900})
+        captured_urls = []
+
+        def _intercept(route):
+            captured_urls.append(route.request.url)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(MOCK_DAILY))
+
+        _setup_mocks(page)
+        page.route("**/api/v1/daily**", _intercept)
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+
+        # Switch to Insights tab and select 1h range
+        page.locator(".tab-btn").last.click()
+        page.locator(".r-btn", has_text="1h").click()
+        page.wait_for_timeout(600)
+
+        daily_urls = [u for u in captured_urls if "/api/v1/daily" in u]
+        assert any("today_only=true" in u for u in daily_urls), (
+            f"Expected today_only=true in daily URL for 1h range, got: {daily_urls}"
+        )
+
+    def test_today_only_not_sent_for_7d_range(self, page: Page, static_server: str):
+        page.set_viewport_size({"width": 1280, "height": 900})
+        captured_urls = []
+
+        def _intercept(route):
+            captured_urls.append(route.request.url)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(MOCK_DAILY))
+
+        _setup_mocks(page)
+        page.route("**/api/v1/daily**", _intercept)
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+
+        page.locator(".tab-btn").last.click()
+        page.locator(".r-btn", has_text="7d").click()
+        page.wait_for_timeout(600)
+
+        daily_urls = [u for u in captured_urls if "/api/v1/daily" in u]
+        assert not any("today_only=true" in u for u in daily_urls), (
+            f"today_only=true must NOT appear in 7d range URL, got: {daily_urls}"
+        )
+
+    def test_chart_title_says_today_for_1h(self, desktop):
+        desktop.locator(".tab-btn").last.click()
+        desktop.locator(".r-btn", has_text="1h").click()
+        desktop.wait_for_timeout(500)
+        text = desktop.locator(".chart-panel.active").inner_text().lower()
+        assert "today" in text
+
+
 class TestOfflineDevice:
     def test_offline_card_dimmed(self, page: Page, static_server: str):
         """A device that is not online should get the s-silent CSS class."""

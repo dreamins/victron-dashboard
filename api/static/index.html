@@ -855,14 +855,20 @@ let _dailyCache={};
 
 async function drawDailyBar(cid){
   const days=RANGE_DAYS[S.range]??30;
+  const todayOnly=days===1;
+  const tzOff=-(new Date().getTimezoneOffset())/60;
+  const cacheKey=todayOnly?`today_${tzOff}`:days;
   const now=Date.now();
   let res;
-  const cached=_dailyCache[days];
+  const cached=_dailyCache[cacheKey];
   if(cached && now-cached.ts<5*60*1000){
     res=cached.result;
   }else{
-    res=await fetch(`/api/v1/daily?days=${days}`).then(r=>r.json());
-    _dailyCache[days]={result:res,ts:now};
+    const url=todayOnly
+      ?`/api/v1/daily?days=1&today_only=true&tz_offset=${tzOff}`
+      :`/api/v1/daily?days=${days}&tz_offset=${tzOff}`;
+    res=await fetch(url).then(r=>r.json());
+    _dailyCache[cacheKey]={result:res,ts:now};
   }
   const canvas=document.getElementById(cid); if(!canvas)return;
   const titleEl=canvas.closest('.chart-card')?.querySelector('.chart-title');
