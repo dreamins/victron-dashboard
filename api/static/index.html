@@ -517,7 +517,7 @@ function buildTabDefs(){
       return `
         <div id="panel-${i}" class="chart-panel ${active}">
           <div class="chart-card"><div class="chart-title">Combined Solar Output</div><div class="chart-container"><canvas id="chart-${i}-comb"></canvas></div></div>
-          <div class="chart-card"><div class="chart-title">30-Day Yield (Wh)</div><div class="chart-container"><canvas id="chart-${i}-bar"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">Daily Yield (Wh)</div><div class="chart-container"><canvas id="chart-${i}-bar"></canvas></div></div>
         </div>`;
     }).join('');
   }
@@ -847,21 +847,26 @@ async function drawMulti(cid,ids,field,start,iv,unit){
   });
 }
 
-// Daily bar chart always shows 30 days regardless of range selection.
-// Cache responses for 5 minutes — the aggregation query is expensive.
-let _dailyCache={days:null,result:null,ts:0};
+// Range → days for the daily yield bar chart
+const RANGE_DAYS={'1h':1,'6h':1,'24h':1,'7d':7,'30d':30,'All':365};
+
+// Cache responses per day-count for 5 minutes — aggregation query is expensive
+let _dailyCache={};
 
 async function drawDailyBar(cid){
-  const days=30;
+  const days=RANGE_DAYS[S.range]??30;
   const now=Date.now();
   let res;
-  if(_dailyCache.days===days && now-_dailyCache.ts<5*60*1000 && _dailyCache.result){
-    res=_dailyCache.result;
+  const cached=_dailyCache[days];
+  if(cached && now-cached.ts<5*60*1000){
+    res=cached.result;
   }else{
     res=await fetch(`/api/v1/daily?days=${days}`).then(r=>r.json());
-    _dailyCache={days,result:res,ts:now};
+    _dailyCache[days]={result:res,ts:now};
   }
   const canvas=document.getElementById(cid); if(!canvas)return;
+  const titleEl=canvas.closest('.chart-card')?.querySelector('.chart-title');
+  if(titleEl) titleEl.textContent=days===1?'Today\'s Yield (Wh)':`${days}-Day Yield (Wh)`;
   if(CH[cid])CH[cid].destroy();
   const c=chartColors();
   const COLS=['rgba(255,204,51,0.75)','rgba(16,185,129,0.75)'];

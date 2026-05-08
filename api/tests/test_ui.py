@@ -141,12 +141,12 @@ class TestSmartUnits:
         # 250 and 180 are both < 1000, so kWh suffix must not appear in cards
         assert "kWh" not in text
 
-    def test_30_day_yield_chart_title(self, desktop):
-        """Bar-chart title says '30-Day Yield (Wh)', never the old '(kWh)'."""
+    def test_yield_chart_title_no_kwh(self, desktop):
+        """Bar-chart title never says '(kWh)' — unit is always Wh."""
         desktop.locator(".tab-btn").last.click()
         desktop.wait_for_timeout(400)
         text = desktop.locator(".chart-panel.active").inner_text().lower()
-        assert "30-day yield" in text
+        assert "yield" in text
         assert "(kwh)" not in text
 
 
@@ -200,19 +200,23 @@ class TestTabInteraction:
         desktop.wait_for_timeout(600)
         expect(desktop.locator(".chart-panel.active")).to_be_visible()
 
-    def test_insights_daily_chart_always_30_days(self, desktop):
-        """Daily bar chart title is always '30-Day Yield (Wh)' regardless of range."""
+    def test_insights_daily_chart_title_follows_range(self, desktop):
+        """Daily bar chart title updates to match the selected range."""
         desktop.locator(".tab-btn").last.click()
         desktop.wait_for_timeout(400)
-        text = desktop.locator(".chart-panel.active").inner_text().lower()
-        assert "30-day yield" in text
-        # Switching range must NOT rename the bar chart title
-        desktop.locator(".r-btn", has_text="7d").click()
-        desktop.wait_for_timeout(400)
-        text2 = desktop.locator(".chart-panel.active").inner_text().lower()
-        assert "30-day yield" in text2
+        # 24h → 1 day → "Today's Yield"
         desktop.locator(".r-btn", has_text="24h").click()
-        desktop.wait_for_timeout(400)
+        desktop.wait_for_timeout(500)
+        text = desktop.locator(".chart-panel.active").inner_text().lower()
+        assert "today" in text
+        # 7d → "7-Day Yield"
+        desktop.locator(".r-btn", has_text="7d").click()
+        desktop.wait_for_timeout(500)
+        text2 = desktop.locator(".chart-panel.active").inner_text().lower()
+        assert "7-day yield" in text2
+        # 30d → "30-Day Yield"
+        desktop.locator(".r-btn", has_text="30d").click()
+        desktop.wait_for_timeout(500)
         text3 = desktop.locator(".chart-panel.active").inner_text().lower()
         assert "30-day yield" in text3
 
