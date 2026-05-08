@@ -1,4 +1,5 @@
 esp32/secrets.yaml
+.claude/settings.local.json
 esp32/.esphome/
 esp32/build/
 config/devices.json
