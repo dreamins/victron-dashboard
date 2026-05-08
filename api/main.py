@@ -171,8 +171,11 @@ from(bucket: "{bucket}")
         }
 
     def get_daily(self, days: int, offset: timedelta) -> List[Dict[str, Any]]:
+        # Use medium bucket (5-min resolution) for multi-day queries — 288× fewer rows
+        # vs the raw bucket, and yield_today is MAX-aggregated so daily peak is preserved.
+        bucket = INFLUX_BUCKET_MEDIUM if days > 1 else INFLUX_BUCKET
         q = f"""
-from(bucket: "{INFLUX_BUCKET}")
+from(bucket: "{bucket}")
   |> range(start: -{days}d)
   |> filter(fn: (r) => r._measurement == "solar" and r._field == "yield_today")
   |> group(columns: ["device"])

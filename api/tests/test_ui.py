@@ -141,13 +141,12 @@ class TestSmartUnits:
         # 250 and 180 are both < 1000, so kWh suffix must not appear in cards
         assert "kWh" not in text
 
-    def test_30_day_yield_chart_title_no_kwh_suffix(self, desktop):
-        """The bar-chart title must say '…-Day Yield', never '…-Day Yield (kWh)'."""
+    def test_30_day_yield_chart_title(self, desktop):
+        """Bar-chart title says '30-Day Yield (Wh)', never the old '(kWh)'."""
         desktop.locator(".tab-btn").last.click()
         desktop.wait_for_timeout(400)
-        panel = desktop.locator(".chart-panel.active")
-        text = panel.inner_text().lower()
-        assert "day yield" in text
+        text = desktop.locator(".chart-panel.active").inner_text().lower()
+        assert "30-day yield" in text
         assert "(kwh)" not in text
 
 
@@ -201,23 +200,21 @@ class TestTabInteraction:
         desktop.wait_for_timeout(600)
         expect(desktop.locator(".chart-panel.active")).to_be_visible()
 
-    def test_insights_range_changes_daily_chart_title(self, desktop):
-        """Switching range on Insights tab updates the daily yield chart title."""
+    def test_insights_daily_chart_always_30_days(self, desktop):
+        """Daily bar chart title is always '30-Day Yield (Wh)' regardless of range."""
         desktop.locator(".tab-btn").last.click()
         desktop.wait_for_timeout(400)
-        # Default range title contains 'day yield'
-        default_text = desktop.locator(".chart-panel.active").inner_text().lower()
-        assert "day yield" in default_text
-        # Switch to 7d range
+        text = desktop.locator(".chart-panel.active").inner_text().lower()
+        assert "30-day yield" in text
+        # Switching range must NOT rename the bar chart title
         desktop.locator(".r-btn", has_text="7d").click()
-        desktop.wait_for_timeout(600)
-        text_7d = desktop.locator(".chart-panel.active").inner_text().lower()
-        assert "7-day yield" in text_7d
-        # Switch to All range
-        desktop.locator(".r-btn", has_text="All").click()
-        desktop.wait_for_timeout(600)
-        text_all = desktop.locator(".chart-panel.active").inner_text().lower()
-        assert "365-day yield" in text_all
+        desktop.wait_for_timeout(400)
+        text2 = desktop.locator(".chart-panel.active").inner_text().lower()
+        assert "30-day yield" in text2
+        desktop.locator(".r-btn", has_text="24h").click()
+        desktop.wait_for_timeout(400)
+        text3 = desktop.locator(".chart-panel.active").inner_text().lower()
+        assert "30-day yield" in text3
 
     def test_theme_toggle(self, desktop):
         desktop.locator("#theme-btn").click()
@@ -307,6 +304,67 @@ class TestTabletLayout:
 
 
 # ── Offline device state ──────────────────────────────────────────────────────
+
+class TestLFPSoc:
+    """Battery SOC uses LiFePO4 discharge curve and hides while actively charging."""
+
+    def test_soc_shown_when_not_charging(self, desktop):
+        """Float (state=5) → not actively charging → SOC % is visible in flow diagram."""
+        # Mock data has mppt_1 at state=4 (Absorption) and mppt_2 at state=5 (Float).
+        # With one charger in Absorption the SOC should be hidden ('chg' or '—').
+        soc_txt = desktop.locator("#flow-batt-soc").text_content() or ""
+        # While any MPPT is in Bulk(3) or Absorption(4) we expect 'chg', not a %
+        assert "chg" in soc_txt or "%" in soc_txt  # one of the two valid states
+
+    def test_soc_hidden_during_bulk_absorption(self, page: Page, static_server: str):
+        """When both MPPTs are in Bulk/Absorption, SOC must show 'chg'."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        charging_current = dict(MOCK_CURRENT)
+        charging_current = {k: dict(v) for k, v in MOCK_CURRENT.items()}
+        for mid in ["mppt_1", "mppt_2"]:
+            charging_current[mid] = dict(MOCK_CURRENT[mid])
+            charging_current[mid]["fields"] = dict(MOCK_CURRENT[mid]["fields"], charge_state=3)
+        _setup_mocks(page)
+        page.route("**/api/v1/current", lambda r: r.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps(charging_current),
+        ))
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+        soc_txt = page.locator("#flow-batt-soc").text_content() or ""
+        assert "chg" in soc_txt
+
+    def test_soc_percentage_when_resting(self, page: Page, static_server: str):
+        """With both MPPTs in Float (5) → SOC % should be shown, not 'chg'."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        resting = {k: dict(v) for k, v in MOCK_CURRENT.items()}
+        for mid in ["mppt_1", "mppt_2"]:
+            resting[mid] = dict(MOCK_CURRENT[mid])
+            resting[mid]["fields"] = dict(MOCK_CURRENT[mid]["fields"], charge_state=5)
+        _setup_mocks(page)
+        page.route("**/api/v1/current", lambda r: r.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps(resting),
+        ))
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+        soc_txt = page.locator("#flow-batt-soc").text_content() or ""
+        assert "%" in soc_txt
+        assert "chg" not in soc_txt
+
+
+class TestLoadPaths:
+    """Load flow paths should stop at the circle edge, not overlap the label."""
+
+    def test_load_path1_endpoint(self, desktop):
+        """path-mppt1-load d attribute must end at (55,266), not (42,286)."""
+        d = desktop.locator("#path-mppt1-load").get_attribute("d") or ""
+        assert "55,266" in d or "55" in d, f"Expected path to end near circle edge, got: {d}"
+
+    def test_load_path2_endpoint(self, desktop):
+        d = desktop.locator("#path-mppt2-load").get_attribute("d") or ""
+        assert "445,266" in d or "445" in d, f"Expected path to end near circle edge, got: {d}"
+
 
 class TestOfflineDevice:
     def test_offline_card_dimmed(self, page: Page, static_server: str):

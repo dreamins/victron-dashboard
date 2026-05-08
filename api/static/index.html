@@ -339,8 +339,9 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <path id="path-pv2"         class="fl" d="M400,80  L400,112"/>
         <path id="path-mppt1"       class="fl" d="M100,198 C100,232 172,232 172,238"/>
         <path id="path-mppt2"       class="fl" d="M400,198 C400,232 328,232 328,238"/>
-        <path id="path-mppt1-load"  class="fl" d="M100,198 L42,286"   style="display:none"/>
-        <path id="path-mppt2-load"  class="fl" d="M400,198 L458,286"  style="display:none"/>
+        <!-- load paths end at circle edge (r=24), not centre, so they don't overlap the label -->
+        <path id="path-mppt1-load"  class="fl" d="M100,198 L55,266"   style="display:none"/>
+        <path id="path-mppt2-load"  class="fl" d="M400,198 L445,266"  style="display:none"/>
       </svg>
     </div>
     <div id="cards"></div>
@@ -412,6 +413,21 @@ function fmtWh(v){
 function wTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(1)+' kW':v+' W'; }
 function whTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(2)+' kWh':v+' Wh'; }
 function setText(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
+
+// ── LiFePO4 4S SOC estimate (resting voltage only — hide while charging) ────
+const LFP_CURVE=[
+  [14.60,100],[13.45,99],[13.40,95],[13.35,90],[13.30,70],
+  [13.25,50],[13.20,30],[13.10,20],[12.80,10],[12.00,0],
+];
+function lfp4Soc(v){
+  if(v>=LFP_CURVE[0][0]) return 100;
+  if(v<=LFP_CURVE[LFP_CURVE.length-1][0]) return 0;
+  for(let i=0;i<LFP_CURVE.length-1;i++){
+    const[v1,s1]=LFP_CURVE[i],[v2,s2]=LFP_CURVE[i+1];
+    if(v>=v2) return Math.round(s2+(v-v2)/(v1-v2)*(s1-s2));
+  }
+  return 0;
+}
 
 function isLight(){ return document.body.classList.contains('light'); }
 function chartColors(){
@@ -500,7 +516,7 @@ function buildTabDefs(){
       return `
         <div id="panel-${i}" class="chart-panel ${active}">
           <div class="chart-card"><div class="chart-title">Combined Solar Output</div><div class="chart-container"><canvas id="chart-${i}-comb"></canvas></div></div>
-          <div class="chart-card"><div class="chart-title">30-Day Yield</div><div class="chart-container"><canvas id="chart-${i}-bar"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">30-Day Yield (Wh)</div><div class="chart-container"><canvas id="chart-${i}-bar"></canvas></div></div>
         </div>`;
     }).join('');
   }
@@ -549,11 +565,17 @@ function renderFlow(){
            ?? m1?.fields?.battery_voltage
            ?? m2?.fields?.battery_voltage
            ?? null;
-  S.bsoc  = S.bvolt!=null ? Math.max(0,Math.min(100,(S.bvolt-12.0)/2.4*100)) : null;
+
+  // SOC: LiFePO4 discharge curve, but only valid at rest (not during Bulk/Absorption)
+  const charging = S.mptts.some(id=>{
+    const cs = S.current[id]?.fields?.charge_state;
+    return cs===3||cs===4; // Bulk or Absorption
+  });
+  S.bsoc = (S.bvolt!=null && !charging) ? lfp4Soc(S.bvolt) : null;
 
   if(S.bvolt!=null){
     setText('flow-batt-v', S.bvolt.toFixed(2)+' V');
-    setText('flow-batt-soc', S.bsoc.toFixed(0)+'%');
+    setText('flow-batt-soc', charging ? 'chg' : S.bsoc.toFixed(0)+'%');
     const bar=document.getElementById('batt-fill-bar');
     if(bar){
       bar.setAttribute('width', String(S.bsoc/100*192));
@@ -824,16 +846,21 @@ async function drawMulti(cid,ids,field,start,iv,unit){
   });
 }
 
-// Map range label → number of days for the daily yield bar chart
-const RANGE_DAYS={'1h':7,'6h':7,'24h':7,'7d':7,'30d':30,'All':365};
+// Daily bar chart always shows 30 days regardless of range selection.
+// Cache responses for 5 minutes — the aggregation query is expensive.
+let _dailyCache={days:null,result:null,ts:0};
 
 async function drawDailyBar(cid){
-  const days=RANGE_DAYS[S.range]??30;
-  const res=await fetch(`/api/v1/daily?days=${days}`).then(r=>r.json());
+  const days=30;
+  const now=Date.now();
+  let res;
+  if(_dailyCache.days===days && now-_dailyCache.ts<5*60*1000 && _dailyCache.result){
+    res=_dailyCache.result;
+  }else{
+    res=await fetch(`/api/v1/daily?days=${days}`).then(r=>r.json());
+    _dailyCache={days,result:res,ts:now};
+  }
   const canvas=document.getElementById(cid); if(!canvas)return;
-  // Update title to reflect actual range
-  const titleEl=canvas.closest('.chart-card')?.querySelector('.chart-title');
-  if(titleEl) titleEl.textContent=`${days}-Day Yield`;
   if(CH[cid])CH[cid].destroy();
   const c=chartColors();
   const COLS=['rgba(255,204,51,0.75)','rgba(16,185,129,0.75)'];
