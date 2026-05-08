@@ -19,7 +19,7 @@
   --border:      rgba(255,255,255,0.08);
   --text:        #f3f4f6;
   --sub:         #9ca3af;
-  --dim:         #374151;
+  --dim:         #4b5563;
   --hdr-bg:      rgba(5,7,10,0.85);
   --node-fill:   #0f172a;
   --node-stroke: rgba(255,255,255,0.08);
@@ -45,7 +45,9 @@ body.light {
   --border:      rgba(0,0,0,0.09);
   --text:        #0f172a;
   --sub:         #64748b;
-  --dim:         #cbd5e1;
+  --dim:         #94a3b8;
+  --batt:        #0891b2;
+  --charge:      #059669;
   --hdr-bg:      rgba(248,250,252,0.90);
   --node-fill:   #ffffff;
   --node-stroke: rgba(0,0,0,0.10);
@@ -110,12 +112,12 @@ header {
 /* ── Layout ──────────────────────────────────────────────────────────── */
 #wrap { flex:1; display:flex; overflow:hidden; min-height:0; }
 #left {
-  flex:0 0 44%; display:flex; flex-direction:column;
+  flex:0 0 42%; display:flex; flex-direction:column;
   overflow-y:auto; overflow-x:hidden;
   border-right:1px solid var(--border);
 }
 #flow {
-  padding:20px 24px; flex-shrink:0;
+  padding:14px 20px; flex-shrink:0;
   background: var(--flow-grad);
 }
 #flow svg { width:100%; filter:drop-shadow(0 0 30px rgba(0,0,0,0.3)); }
@@ -126,13 +128,13 @@ header {
 .nv { fill:var(--node-val); font-size:14px; font-weight:700; }
 .nbig { font-size:20px; font-weight:800; }
 @keyframes dash { to { stroke-dashoffset:-20; } }
-.fl { fill:none; stroke:var(--dim); stroke-width:3; stroke-linecap:round; }
-.fl-active { stroke-dasharray:6 14; }
+.fl { fill:none; stroke:var(--dim); stroke-width:3.5; stroke-linecap:round; }
+.fl-active { stroke-dasharray:7 13; }
 
 /* ── Cards ───────────────────────────────────────────────────────────── */
 #cards {
-  display:grid; grid-template-columns:repeat(2,1fr); gap:14px;
-  padding:0 24px 28px;
+  display:grid; grid-template-columns:repeat(2,1fr); gap:12px;
+  padding:0 20px 20px;
 }
 .card {
   background:var(--surf-1); backdrop-filter:blur(10px);
@@ -192,10 +194,36 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 .chart-title { font-size:11px; font-weight:800; color:var(--sub); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; }
 .chart-container { height:210px; position:relative; }
 
+/* ── Back button (mobile only) ───────────────────────────────────────── */
+#back-btn {
+  display:none; align-items:center; gap:10px; width:100%;
+  padding:12px 20px; border:none; cursor:pointer; flex-shrink:0;
+  background:var(--surf-1); border-bottom:1px solid var(--border);
+  color:var(--text); font-size:14px; font-weight:700; font-family:inherit;
+}
+#back-btn:active { background:var(--surf-2); }
+
 @media(max-width:1024px){
   #wrap { flex-direction:column; overflow-y:auto; }
   #left { flex:none; border-right:none; }
   #cards { grid-template-columns:1fr; }
+}
+
+@media(max-width:768px){
+  body { overflow-y:auto; }
+  #wrap { overflow:visible; min-height:auto; }
+  #left { overflow:visible; }
+  #flow { padding:10px 16px; }
+  #cards { padding:0 16px 16px; gap:10px; }
+  .card { padding:14px; }
+  #right {
+    position:fixed; inset:0; top:var(--hh); z-index:200;
+    background:var(--bg); display:none; flex-direction:column;
+  }
+  body.mobile-detail #right { display:flex; }
+  #back-btn { display:flex; }
+  .tab-bar { padding:8px 12px; }
+  .range-bar { padding:6px 12px; }
 }
 </style>
 </head>
@@ -218,7 +246,7 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 <div id="wrap">
   <div id="left">
     <div id="flow">
-      <svg viewBox="0 0 500 380" xmlns="http://www.w3.org/2000/svg">
+      <svg viewBox="0 0 500 350" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <linearGradient id="g-solar" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#ffcc33"/><stop offset="100%" stop-color="#f97316"/>
@@ -230,27 +258,35 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
             <stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#f59e0b"/>
           </linearGradient>
           <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feComposite in="SourceGraphic" in2="b" operator="over"/></filter>
+          <!-- Solar cell tile: 3 rows × 2 cols inside each PV box -->
+          <pattern id="solar-cell" x="0" y="0" width="26" height="22" patternUnits="userSpaceOnUse">
+            <rect x="1" y="1" width="24" height="20" rx="2"
+              fill="rgba(30,58,138,0.22)" stroke="rgba(255,204,51,0.35)" stroke-width="0.6"/>
+            <line x1="12.5" y1="1" x2="12.5" y2="21" stroke="rgba(255,204,51,0.15)" stroke-width="0.5"/>
+          </pattern>
           <clipPath id="batt-clip"><rect x="154" y="254" width="192" height="74" rx="7"/></clipPath>
         </defs>
 
-        <!-- PV Input Nodes — labels updated from JS -->
-        <rect id="pv1-box" class="nb" x="20" y="16" width="160" height="60" rx="16"/>
-        <line x1="52"  y1="30" x2="52"  y2="66" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <line x1="76"  y1="30" x2="76"  y2="66" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <line x1="100" y1="30" x2="100" y2="66" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <line x1="124" y1="30" x2="124" y2="66" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <line x1="44"  y1="48" x2="136" y2="48" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <text id="pv1-label" class="nl" x="100" y="32" text-anchor="middle">—</text>
-        <text class="nv" id="flow-pv1-val" x="100" y="62" text-anchor="middle">—</text>
+        <!-- PV Panel 1 — solar cell tile + label + value -->
+        <rect id="pv1-box" class="nb" x="20" y="12" width="160" height="68" rx="12"/>
+        <rect x="24" y="16" width="152" height="60" rx="9" fill="url(#solar-cell)" opacity="0.9"/>
+        <!-- aluminium frame lines -->
+        <line x1="24" y1="37" x2="176" y2="37" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+        <line x1="24" y1="55" x2="176" y2="55" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+        <line x1="76" y1="16" x2="76" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+        <line x1="124" y1="16" x2="124" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+        <text id="pv1-label" class="nl" x="100" y="29" text-anchor="middle" style="font-size:9px">—</text>
+        <text class="nv" id="flow-pv1-val" x="100" y="66" text-anchor="middle" style="font-size:15px;font-weight:800">—</text>
 
-        <rect id="pv2-box" class="nb" x="320" y="16" width="160" height="60" rx="16"/>
-        <line x1="352" y1="30" x2="352" y2="66" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <line x1="376" y1="30" x2="376" y2="66" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <line x1="400" y1="30" x2="400" y2="66" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <line x1="424" y1="30" x2="424" y2="66" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <line x1="344" y1="48" x2="436" y2="48" stroke="rgba(255,204,51,0.12)" stroke-width="1.5"/>
-        <text id="pv2-label" class="nl" x="400" y="32" text-anchor="middle">—</text>
-        <text class="nv" id="flow-pv2-val" x="400" y="62" text-anchor="middle">—</text>
+        <!-- PV Panel 2 -->
+        <rect id="pv2-box" class="nb" x="320" y="12" width="160" height="68" rx="12"/>
+        <rect x="324" y="16" width="152" height="60" rx="9" fill="url(#solar-cell)" opacity="0.9"/>
+        <line x1="324" y1="37" x2="476" y2="37" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+        <line x1="324" y1="55" x2="476" y2="55" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+        <line x1="376" y1="16" x2="376" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+        <line x1="424" y1="16" x2="424" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+        <text id="pv2-label" class="nl" x="400" y="29" text-anchor="middle" style="font-size:9px">—</text>
+        <text class="nv" id="flow-pv2-val" x="400" y="66" text-anchor="middle" style="font-size:15px;font-weight:800">—</text>
 
         <!-- MPPT Nodes — labels updated from JS, clickable -->
         <rect id="mppt1-box" class="nb" x="20" y="112" width="160" height="86" rx="20" style="cursor:pointer" onclick="switchTab(0)"/>
@@ -282,8 +318,8 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <rect id="batt-fill-bar" x="154" y="252" width="0" height="76" fill="url(#g-batt-hi)" opacity="0.45" clip-path="url(#batt-clip)"/>
         <!-- Labels -->
         <text class="nl" x="250" y="266" text-anchor="middle" style="cursor:pointer;font-size:9px;letter-spacing:0.5px" onclick="switchTab(2)">LiFePO₄ · Battery</text>
-        <text class="nv" id="flow-batt-v" x="208" y="300" text-anchor="middle" style="font-size:19px;font-weight:800;fill:#00f2ff;cursor:pointer" onclick="switchTab(2)">—</text>
-        <text id="flow-batt-soc" style="fill:#9ca3af;font-size:12px;font-weight:700;cursor:pointer" x="308" y="290" text-anchor="middle" onclick="switchTab(2)">—</text>
+        <text class="nv" id="flow-batt-v" x="208" y="300" text-anchor="middle" style="font-size:19px;font-weight:800;fill:var(--batt);cursor:pointer" onclick="switchTab(2)">—</text>
+        <text id="flow-batt-soc" style="fill:var(--sub);font-size:12px;font-weight:700;cursor:pointer" x="308" y="290" text-anchor="middle" onclick="switchTab(2)">—</text>
         <text class="nv" id="flow-batt-t" x="308" y="308" text-anchor="middle" style="font-size:12px;fill:#9ca3af;cursor:pointer" onclick="switchTab(2)">—</text>
 
         <!-- Load nodes — hidden until JS shows them -->
@@ -299,18 +335,19 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         </g>
 
         <!-- Flow paths -->
-        <path id="path-pv1"         class="fl" d="M100,76  L100,112"/>
-        <path id="path-pv2"         class="fl" d="M400,76  L400,112"/>
-        <path id="path-mppt1"       class="fl" d="M100,198 Q100,290 150,290"/>
-        <path id="path-mppt2"       class="fl" d="M400,198 Q400,290 350,290"/>
-        <path id="path-mppt1-load"  class="fl" d="M100,198 L66,262"  style="display:none"/>
-        <path id="path-mppt2-load"  class="fl" d="M400,198 L434,262" style="display:none"/>
+        <path id="path-pv1"         class="fl" d="M100,80  L100,112"/>
+        <path id="path-pv2"         class="fl" d="M400,80  L400,112"/>
+        <path id="path-mppt1"       class="fl" d="M100,198 C100,232 172,232 172,238"/>
+        <path id="path-mppt2"       class="fl" d="M400,198 C400,232 328,232 328,238"/>
+        <path id="path-mppt1-load"  class="fl" d="M100,198 L42,286"   style="display:none"/>
+        <path id="path-mppt2-load"  class="fl" d="M400,198 L458,286"  style="display:none"/>
       </svg>
     </div>
     <div id="cards"></div>
   </div>
 
   <div id="right">
+    <button id="back-btn" onclick="closeMobileDetail()">← Back to overview</button>
     <div class="tab-bar" id="tab-bar">
       <!-- tab buttons injected by JS so names come from real device data -->
     </div>
@@ -434,11 +471,12 @@ function buildTabDefs(){
   const INSIGHTS_IDX=defs.findIndex(d=>d.kind==='insights');
   if(S.tab===3 && INSIGHTS_IDX>=0) S.tab=INSIGHTS_IDX; // keep pointing to Insights
 
-  // Build tab bar
+  // Build tab bar (only rebuild when tab count or active tab changes)
   const bar=document.getElementById('tab-bar');
-  bar.innerHTML=defs.map((d,i)=>
+  const tabHtml=defs.map((d,i)=>
     `<button class="tab-btn${i===S.tab?' active':''}" onclick="switchTab(${i})">${d.label}</button>`
   ).join('');
+  if(bar.innerHTML!==tabHtml) bar.innerHTML=tabHtml;
 
   // Build panels if not yet done or count changed
   const wrap=document.getElementById('panels');
@@ -462,7 +500,7 @@ function buildTabDefs(){
       return `
         <div id="panel-${i}" class="chart-panel ${active}">
           <div class="chart-card"><div class="chart-title">Combined Solar Output</div><div class="chart-container"><canvas id="chart-${i}-comb"></canvas></div></div>
-          <div class="chart-card"><div class="chart-title">30-Day Yield (kWh)</div><div class="chart-container"><canvas id="chart-${i}-bar"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">30-Day Yield</div><div class="chart-container"><canvas id="chart-${i}-bar"></canvas></div></div>
         </div>`;
     }).join('');
   }
@@ -591,11 +629,15 @@ function updatePath(id,val,col,maxVal){
   if(val>0.05){
     const ratio=Math.min(val/maxVal,1);
     const dur=(Math.max(0.5, 3.0-ratio*2.5)).toFixed(2);
-    p.classList.add('fl-active');
-    p.style.stroke=col;
-    p.style.filter='url(#glow)';
-    p.style.animation=`dash ${dur}s linear infinite`;
-  }else{
+    const anim=`dash ${dur}s linear infinite`;
+    // Guard: only touch style when values actually change to avoid animation restarts
+    if(!p.classList.contains('fl-active') || p.style.stroke!==col || p.style.animation!==anim){
+      p.classList.add('fl-active');
+      p.style.stroke=col;
+      p.style.filter='url(#glow)';
+      p.style.animation=anim;
+    }
+  }else if(p.classList.contains('fl-active')){
     p.classList.remove('fl-active');
     p.style.stroke=''; p.style.filter=''; p.style.animation='';
   }
@@ -603,17 +645,25 @@ function updatePath(id,val,col,maxVal){
 
 // ── Cards ──────────────────────────────────────────────────────────────────
 
+let _cardsKey='';
+
 function renderCards(){
   const cont=document.getElementById('cards');
-  // Build ordered list: MPPTs first, then battery sense
   const ids=[...S.mptts,...(S.bsense?[S.bsense]:[])];
+  // Skip rebuild if the data that drives card content hasn't changed
+  const key=ids.map(id=>{
+    const f=S.current[id]?.fields||{};
+    return `${id}:${f.pv_power??''}:${f.charge_state??''}:${f.charge_current??''}:${f.battery_voltage??''}:${f.yield_today??''}:${f.temperature??''}:${S.tab}`;
+  }).join('|')+(S.bridge_online?'1':'0');
+  if(key===_cardsKey) return;
+  _cardsKey=key;
 
   cont.innerHTML=ids.map((id)=>{
     const d=S.current[id];
     const info=S.devices.find(x=>x.id===id);
     const isM=S.mptts.includes(id);
     const tabIdx=isM ? S.mptts.indexOf(id) : S.tabDefs.findIndex(t=>t.kind==='battery');
-    const accent=isM?'#ffcc33':'#00f2ff';
+    const accent=isM?'#ffcc33':'var(--batt)';
     const isActive=S.tab===tabIdx;
 
     // ── MPPT card ──
@@ -676,9 +726,13 @@ function switchTab(idx){
   S.tab=idx;
   document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',i===idx));
   document.querySelectorAll('.chart-panel').forEach((p,i)=>p.classList.toggle('active',i===idx));
-  // Highlight active card
   renderCards();
   updateCharts();
+  if(window.innerWidth<=768) document.body.classList.add('mobile-detail');
+}
+
+function closeMobileDetail(){
+  document.body.classList.remove('mobile-detail');
 }
 
 function switchRange(l){
@@ -770,9 +824,16 @@ async function drawMulti(cid,ids,field,start,iv,unit){
   });
 }
 
+// Map range label → number of days for the daily yield bar chart
+const RANGE_DAYS={'1h':7,'6h':7,'24h':7,'7d':7,'30d':30,'All':365};
+
 async function drawDailyBar(cid){
-  const res=await fetch('/api/v1/daily?days=30').then(r=>r.json());
+  const days=RANGE_DAYS[S.range]??30;
+  const res=await fetch(`/api/v1/daily?days=${days}`).then(r=>r.json());
   const canvas=document.getElementById(cid); if(!canvas)return;
+  // Update title to reflect actual range
+  const titleEl=canvas.closest('.chart-card')?.querySelector('.chart-title');
+  if(titleEl) titleEl.textContent=`${days}-Day Yield`;
   if(CH[cid])CH[cid].destroy();
   const c=chartColors();
   const COLS=['rgba(255,204,51,0.75)','rgba(16,185,129,0.75)'];
