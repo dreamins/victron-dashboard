@@ -416,8 +416,9 @@ function setText(id,v){const e=document.getElementById(id);if(e)e.textContent=v;
 
 // ── LiFePO4 4S SOC estimate (resting voltage only — hide while charging) ────
 const LFP_CURVE=[
-  [14.60,100],[13.45,99],[13.40,95],[13.35,90],[13.30,70],
-  [13.25,50],[13.20,30],[13.10,20],[12.80,10],[12.00,0],
+  [13.60,100],[13.50,99],[13.40,95],[13.33,90],[13.30,80],
+  [13.28,70],[13.25,60],[13.22,50],[13.20,40],[13.16,30],
+  [13.10,20],[12.80,10],[12.00,0],
 ];
 function lfp4Soc(v){
   if(v>=LFP_CURVE[0][0]) return 100;

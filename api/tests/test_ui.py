@@ -335,7 +335,8 @@ class TestLFPSoc:
         assert "chg" in soc_txt
 
     def test_soc_percentage_when_resting(self, page: Page, static_server: str):
-        """With both MPPTs in Float (5) → SOC % should be shown, not 'chg'."""
+        """With both MPPTs in Float (5) → SOC % shown, not 'chg'.
+        Mock battery_voltage=13.8 V → above LFP_CURVE top (13.60) → 100%."""
         page.set_viewport_size({"width": 1280, "height": 900})
         resting = {k: dict(v) for k, v in MOCK_CURRENT.items()}
         for mid in ["mppt_1", "mppt_2"]:
@@ -351,6 +352,8 @@ class TestLFPSoc:
         soc_txt = page.locator("#flow-batt-soc").text_content() or ""
         assert "%" in soc_txt
         assert "chg" not in soc_txt
+        # 13.8 V is above the curve top (13.60) → should report 100%
+        assert "100%" in soc_txt
 
 
 class TestLoadPaths:
