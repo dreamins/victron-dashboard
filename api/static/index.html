@@ -276,7 +276,8 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <line x1="76" y1="16" x2="76" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <line x1="124" y1="16" x2="124" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <text id="pv1-label" class="nl" x="100" y="29" text-anchor="middle" style="font-size:9px">—</text>
-        <text class="nv" id="flow-pv1-val" x="100" y="66" text-anchor="middle" style="font-size:15px;font-weight:800">—</text>
+        <text class="nv" id="flow-pv1-volt" x="100" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">—</text>
+        <text class="nv" id="flow-pv1-val" x="100" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">—</text>
 
         <!-- PV Panel 2 -->
         <rect id="pv2-box" class="nb" x="320" y="12" width="160" height="68" rx="12"/>
@@ -286,7 +287,8 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <line x1="376" y1="16" x2="376" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <line x1="424" y1="16" x2="424" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <text id="pv2-label" class="nl" x="400" y="29" text-anchor="middle" style="font-size:9px">—</text>
-        <text class="nv" id="flow-pv2-val" x="400" y="66" text-anchor="middle" style="font-size:15px;font-weight:800">—</text>
+        <text class="nv" id="flow-pv2-volt" x="400" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">—</text>
+        <text class="nv" id="flow-pv2-val" x="400" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">—</text>
 
         <!-- MPPT Nodes — labels updated from JS, clickable -->
         <rect id="mppt1-box" class="nb" x="20" y="112" width="160" height="86" rx="20" style="cursor:pointer" onclick="switchTab(0)"/>
@@ -504,6 +506,7 @@ function buildTabDefs(){
       if(d.kind==='mppt') return `
         <div id="panel-${i}" class="chart-panel ${active}">
           <div class="chart-card"><div class="chart-title">Solar Power</div><div class="chart-container"><canvas id="chart-${i}-p"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">PV Voltage</div><div class="chart-container"><canvas id="chart-${i}-pv"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Charge Current</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Battery Voltage</div><div class="chart-container"><canvas id="chart-${i}-v"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Load Power</div><div class="chart-container"><canvas id="chart-${i}-l"></canvas></div></div>
@@ -610,6 +613,8 @@ function pvWatts(m){
 function setPvNode(idx,m){
   const w=pvWatts(m);
   setText(`flow-pv${idx}-val`, w!=null ? fmtW(w) : '—');
+  const volt=m?.fields?.pv_voltage;
+  setText(`flow-pv${idx}-volt`, volt!=null ? volt.toFixed(1)+' V' : '—');
   const box=document.getElementById(`pv${idx}-box`);
   if(box){
     box.style.stroke = (w!=null&&w>5) ? 'rgba(255,204,51,0.55)' : '';
@@ -676,7 +681,7 @@ function renderCards(){
   // Skip rebuild if the data that drives card content hasn't changed
   const key=ids.map(id=>{
     const f=S.current[id]?.fields||{};
-    return `${id}:${f.pv_power??''}:${f.charge_state??''}:${f.charge_current??''}:${f.battery_voltage??''}:${f.yield_today??''}:${f.temperature??''}:${S.tab}`;
+    return `${id}:${f.pv_power??''}:${f.pv_voltage??''}:${f.charge_state??''}:${f.charge_current??''}:${f.battery_voltage??''}:${f.yield_today??''}:${f.temperature??''}:${S.tab}`;
   }).join('|')+(S.bridge_online?'1':'0');
   if(key===_cardsKey) return;
   _cardsKey=key;
@@ -699,6 +704,7 @@ function renderCards(){
                  : 'Solar Power';
       const bv   = fv(d,'battery_voltage',' V',2);
       const cc   = d?.fields?.charge_current!=null ? d.fields.charge_current.toFixed(2)+' A' : '—';
+      const pvv  = d?.fields?.pv_voltage!=null ? d.fields.pv_voltage.toFixed(1)+' V' : '—';
       const yt   = fmtWh(d?.fields?.yield_today??null);
       const cs   = Math.round(d?.fields?.charge_state??0);
       const stLbl= (STATES[cs]||STATES[0])[0];
@@ -710,9 +716,10 @@ function renderCards(){
           <span class="c-hero-num" style="color:${accent}">${hNum}</span>
         </div>
         <div class="c-hero-label">${hLbl}</div>
-        <div class="c-grid">
-          <div><div class="m-v">${bv}</div><div class="m-l">Battery</div></div>
-          <div><div class="m-v">${cc}</div><div class="m-l">Charge</div></div>
+        <div class="c-grid" style="grid-template-columns:repeat(2,1fr)">
+          <div><div class="m-v">${bv}</div><div class="m-l">Battery V</div></div>
+          <div><div class="m-v">${cc}</div><div class="m-l">Charge A</div></div>
+          <div><div class="m-v">${pvv}</div><div class="m-l">PV Volt</div></div>
           <div><div class="m-v">${yt}</div><div class="m-l">Today</div></div>
         </div>
       </div>`;
@@ -775,10 +782,11 @@ async function updateCharts(){
 
   if(def.kind==='mppt'){
     const id=def.id;
-    await drawLine(`chart-${S.tab}-p`,id,'pv_power',       rng.st,iv,'#ffcc33',wTick);
-    await drawLine(`chart-${S.tab}-c`,id,'charge_current', rng.st,iv,'#10b981',' A');
-    await drawLine(`chart-${S.tab}-v`,id,'battery_voltage',rng.st,iv,'#00f2ff',' V');
-    await drawLine(`chart-${S.tab}-l`,id,'load_power',     rng.st,iv,'#f97316',wTick);
+    await drawLine(`chart-${S.tab}-p`, id,'pv_power',       rng.st,iv,'#ffcc33',wTick);
+    await drawLine(`chart-${S.tab}-pv`,id,'pv_voltage',     rng.st,iv,'#a78bfa',' V');
+    await drawLine(`chart-${S.tab}-c`, id,'charge_current', rng.st,iv,'#10b981',' A');
+    await drawLine(`chart-${S.tab}-v`, id,'battery_voltage',rng.st,iv,'#00f2ff',' V');
+    await drawLine(`chart-${S.tab}-l`, id,'load_power',     rng.st,iv,'#f97316',wTick);
   }else if(def.kind==='battery'){
     const voltIds=[...(S.bsense?[S.bsense]:[]),...S.mptts];
     await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,iv,' V');
