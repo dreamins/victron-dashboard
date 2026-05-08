@@ -614,7 +614,8 @@ function setPvNode(idx,m){
   const w=pvWatts(m);
   setText(`flow-pv${idx}-val`, w!=null ? fmtW(w) : '—');
   const volt=m?.fields?.pv_voltage;
-  setText(`flow-pv${idx}-volt`, volt!=null ? volt.toFixed(1)+' V' : '—');
+  const cs=Math.round(m?.fields?.charge_state??0);
+  setText(`flow-pv${idx}-volt`, (volt!=null && cs!==0 && volt>=3) ? volt.toFixed(1)+' V' : '—');
   const box=document.getElementById(`pv${idx}-box`);
   if(box){
     box.style.stroke = (w!=null&&w>5) ? 'rgba(255,204,51,0.55)' : '';
@@ -704,7 +705,7 @@ function renderCards(){
                  : 'Solar Power';
       const bv   = fv(d,'battery_voltage',' V',2);
       const cc   = d?.fields?.charge_current!=null ? d.fields.charge_current.toFixed(2)+' A' : '—';
-      const pvv  = d?.fields?.pv_voltage!=null ? d.fields.pv_voltage.toFixed(1)+' V' : '—';
+      const pvv  = (d?.fields?.pv_voltage!=null && cs!==0 && d.fields.pv_voltage>=3) ? d.fields.pv_voltage.toFixed(1)+' V' : '—';
       const yt   = fmtWh(d?.fields?.yield_today??null);
       const cs   = Math.round(d?.fields?.charge_state??0);
       const stLbl= (STATES[cs]||STATES[0])[0];
