@@ -1,4 +1,4 @@
-# Victron Solar Monitor
+﻿# Victron Solar Monitor
 
 A self-hosted solar energy dashboard for Victron BLE devices — no cloud, no subscriptions, no Victron servers. An ESP32 passively captures BLE advertisements from your Victron devices and feeds a web dashboard you can reach from anywhere over HTTPS.
 
