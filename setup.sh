@@ -1,4 +1,65 @@
 #!/usr/bin/env bash
+# =============================================================================
+# Solar Monitor — interactive setup wizard
+# =============================================================================
+#
+# PURPOSE
+#   Single entry point for first-time setup and re-runs. Walks the user through
+#   every configuration step in order, does all work silently, and only asks for
+#   information that cannot be automated (WiFi password, device encryption keys,
+#   domain name, Google OAuth credentials).
+#
+# USAGE
+#   ./setup.sh          — run all steps (idempotent; safe to re-run)
+#
+# STEPS (in order, each idempotent)
+#   1. _setup_server        — detect LAN IP, generate ALL credentials, start
+#                             the MQTT broker and database
+#   2. _setup_flash         — print the scp + esphome flash command for the
+#                             ESP32; wait for user confirmation
+#   3. _setup_devices       — run discover.py interactively to collect device
+#                             labels and AES-128 encryption keys from the user;
+#                             writes config/devices.json (gitignored)
+#   4. _setup_dashboard     — build and start the BLE decoder + API/dashboard;
+#                             verify the health endpoint is reachable
+#   5. _setup_remote_access — obtain a Let's Encrypt TLS certificate via DNS-01,
+#                             configure Google OAuth (oauth2-proxy), start nginx;
+#                             this step is skippable (Ctrl+C)
+#
+# KEY FILES READ / WRITTEN
+#   .env                  — all generated secrets and config (gitignored)
+#   esp32/secrets.yaml    — WiFi + MQTT credentials for the ESP32 (gitignored)
+#   config/devices.json   — per-device MAC + label + AES key (gitignored)
+#   config/allowed_emails — Google accounts allowed through OAuth (gitignored,
+#                           regenerated from ALLOWED_EMAIL in .env on every run)
+#
+# .env VARIABLES (written by this script)
+#   MQTT_BIND_IP          — server LAN IP (mosquitto binds here only)
+#   MQTT_ESP32_PASS       — MQTT password for the ESP32 bridge client
+#   MQTT_DECODER_PASS     — MQTT password for the ble-decoder client
+#   INFLUXDB_TOKEN        — InfluxDB admin API token
+#   INFLUXDB_ADMIN_PASS   — InfluxDB admin UI password
+#   DOMAIN                — FQDN for HTTPS access (e.g. solar.example.com)
+#   GOOGLE_CLIENT_ID      — Google OAuth 2.0 client ID
+#   GOOGLE_CLIENT_SECRET  — Google OAuth 2.0 client secret
+#   OAUTH2_COOKIE_SECRET  — random 32-byte secret for oauth2-proxy session cookies
+#   ALLOWED_EMAIL         — Google account email allowed to access the dashboard
+#   TZ_OFFSET_HOURS       — (optional) UTC offset for daily yield grouping
+#
+# SERVICES MANAGED (via docker compose)
+#   mosquitto             — MQTT broker, LAN-only, auth required
+#   influxdb              — time-series database (4 buckets + 4 downsample tasks)
+#   ble-decoder           — decrypts BLE payloads, writes to InfluxDB
+#   solar-api             — FastAPI app serving dashboard + REST API on :8080
+#   oauth2-proxy          — Google OAuth gate in front of solar-api
+#   nginx                 — TLS termination on :8443, forwards to oauth2-proxy
+#
+# IDEMPOTENCY
+#   Each step checks whether its output already exists before doing any work.
+#   Re-running is always safe. To redo a step, remove its sentinel from .env
+#   (e.g. remove INFLUXDB_TOKEN to redo server setup, remove DOMAIN to redo TLS).
+#
+# =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,12 +69,14 @@ BOLD=$'\033[1m'
 GREEN=$'\033[0;32m'
 YELLOW=$'\033[1;33m'
 RED=$'\033[0;31m'
+CYAN=$'\033[0;36m'
 NC=$'\033[0m'
 
-header() { echo -e "\n${BOLD}=== $* ===${NC}\n"; }
-ok()     { echo -e "${GREEN}[+]${NC} $*"; }
-warn()   { echo -e "${YELLOW}[!]${NC} $*"; }
-die()    { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
+ok()   { echo -e "  ${GREEN}✓${NC}  $*"; }
+warn() { echo -e "  ${YELLOW}!${NC}  $*"; }
+die()  { echo -e "\n  ${RED}✗${NC}  $*\n" >&2; exit 1; }
+step() { echo -e "\n${BOLD}${CYAN}▸ $*${NC}"; }
+hr()   { echo -e "\n${BOLD}────────────────────────────────────────────────${NC}"; }
 
 set_env() {
     local key="$1" val="$2"
@@ -23,56 +86,62 @@ set_env() {
     mv .env.tmp .env
 }
 
-# ─── Phase 1: ESP32 Firmware Setup ──────────────────────────────────────────
+get_env() { grep "^${1}=" .env 2>/dev/null | cut -d= -f2; }
 
-phase1() {
-    header "Phase 1 — ESP32 Firmware Setup"
+# ─── Step 1: Network, credentials, core services ─────────────────────────────
+# Generates ALL secrets upfront so no later step needs openssl. Starts mosquitto
+# and influxdb (influxdb init scripts in influxdb/init/ run once on first start
+# and create the victron_medium / victron_hourly / victron_test buckets and the
+# four Flux downsampling tasks; they do NOT re-run on container restarts).
 
-    # Prerequisites
-    for cmd in openssl nmcli; do
-        command -v "$cmd" &>/dev/null || die "$cmd not found. Install it and re-run."
-    done
-
-    # Idempotency: skip if secrets.yaml already populated
-    if [[ -f esp32/secrets.yaml ]] && grep -q 'mqtt_password: ".\+' esp32/secrets.yaml 2>/dev/null; then
-        warn "esp32/secrets.yaml already exists with credentials — skipping generation"
-        warn "Delete esp32/secrets.yaml to regenerate."
-        print_flash_instructions
+_setup_server() {
+    # Already done?
+    if [[ -n "$(get_env INFLUXDB_TOKEN)" && -n "$(get_env MQTT_BIND_IP)" ]]; then
+        ok "Server already configured"
         return
     fi
 
-    # LAN IP
-    header "Server LAN IP"
+    command -v docker  &>/dev/null || die "Docker is not installed. Install Docker and re-run."
+    command -v openssl &>/dev/null || die "openssl not found. Install it and re-run."
+    command -v nmcli   &>/dev/null || die "nmcli not found (NetworkManager). Install it and re-run."
+
+    # Detect server IP
+    step "Detecting server address"
     LAN_IP=$(hostname -I | awk '{print $1}')
-    [[ -n "$LAN_IP" ]] || die "Could not detect LAN IP"
-    ok "Detected LAN IP: ${BOLD}${LAN_IP}${NC}"
+    [[ -n "$LAN_IP" ]] || die "Could not detect a LAN IP address."
+    ok "Server address: ${BOLD}${LAN_IP}${NC}"
+    warn "This address must not change. Set a DHCP reservation in your router for this machine."
 
+    # WiFi for the sensor bridge
+    hr
+    echo -e "\n${BOLD}WiFi setup${NC}"
+    echo "  The sensor bridge needs to connect to your local WiFi network."
     echo ""
-    warn "This IP must be stable. If it changes, the ESP32 cannot reach MQTT."
-    echo -n "  Server MAC (for DHCP reservation): "
-    ip link show "$(ip route | awk '/default/{print $5; exit}')" 2>/dev/null | awk '/ether/{print $2}' || echo "(run: ip link show)"
+    ok "Available networks:"
+    nmcli -f SSID,SIGNAL device wifi list --rescan yes 2>/dev/null \
+        | awk 'NR==1 || /\S/' | head -12 | sed 's/^/     /'
     echo ""
-    read -rp "Have you set a DHCP reservation for this server in your router? [y/N] " ans
-    [[ "$ans" =~ ^[Yy]$ ]] || { warn "Set a DHCP reservation, then re-run."; exit 0; }
+    read -rp "  WiFi network name: " WIFI_SSID
+    [[ -n "$WIFI_SSID" ]] || die "WiFi name cannot be empty."
+    read -rsp "  WiFi password:     " WIFI_PASS; echo ""
+    [[ -n "$WIFI_PASS" ]]  || die "WiFi password cannot be empty."
 
-    # WiFi
-    header "WiFi"
-    ok "Scanning for networks..."
-    nmcli -f SSID,SIGNAL device wifi list --rescan yes 2>/dev/null | head -15
-    echo ""
-    read -rp "WiFi SSID: " WIFI_SSID
-    read -rsp "WiFi password: " WIFI_PASS
-    echo ""
-
-    # Credentials
-    header "Generating credentials"
+    # Generate all credentials
+    step "Generating credentials"
     ESP32_PASS=$(openssl rand -hex 16)
     DECODER_PASS=$(openssl rand -hex 16)
     OTA_PASS=$(openssl rand -hex 8)
     FALLBACK_PASS=$(openssl rand -hex 8)
-    ok "MQTT credentials generated"
+    INFLUXDB_TOKEN=$(openssl rand -hex 32)
+    INFLUXDB_ADMIN_PASS=$(openssl rand -hex 16)
 
-    # Write esp32/secrets.yaml
+    set_env MQTT_BIND_IP       "$LAN_IP"
+    set_env MQTT_ESP32_PASS    "$ESP32_PASS"
+    set_env MQTT_DECODER_PASS  "$DECODER_PASS"
+    set_env INFLUXDB_TOKEN     "$INFLUXDB_TOKEN"
+    set_env INFLUXDB_ADMIN_PASS "$INFLUXDB_ADMIN_PASS"
+
+    # Write sensor bridge config
     cat > esp32/secrets.yaml <<EOF
 wifi_ssid: "${WIFI_SSID}"
 wifi_password: "${WIFI_PASS}"
@@ -82,253 +151,309 @@ mqtt_password: "${ESP32_PASS}"
 ota_password: "${OTA_PASS}"
 fallback_password: "${FALLBACK_PASS}"
 EOF
-    ok "esp32/secrets.yaml written"
-    warn "This file is gitignored — back it up separately"
+    ok "Credentials generated and saved"
 
-    # Write .env for docker-compose
-    set_env MQTT_BIND_IP    "$LAN_IP"
-    set_env MQTT_ESP32_PASS "$ESP32_PASS"
-    set_env MQTT_DECODER_PASS "$DECODER_PASS"
-    ok ".env updated (MQTT_BIND_IP, MQTT_ESP32_PASS, MQTT_DECODER_PASS)"
-
-    print_flash_instructions
-}
-
-print_flash_instructions() {
-    header "Next steps — Flash the ESP32"
-
-    LAN_IP=$(grep MQTT_BIND_IP .env 2>/dev/null | cut -d= -f2 || hostname -I | awk '{print $1}')
-    DECODER_PASS=$(grep MQTT_DECODER_PASS .env 2>/dev/null | cut -d= -f2 || echo "<see .env>")
-
-    cat <<EOF
-
-${BOLD}On the machine connected to the ESP32 via USB (your Windows machine):${NC}
-
-  1. Install ESPHome:
-       pip install esphome
-
-  2. Copy esp32/secrets.yaml to that machine (scp, USB stick, or shared drive).
-     It is gitignored — transfer it manually.
-
-  3. Flash (first time via USB, subsequent updates are OTA over WiFi):
-       cd esp32/
-       esphome run victron-bridge.yaml
-
-  4. Mount the ESP32 within ~10 m line-of-sight of the Victron devices.
-     Power via any USB adapter.
-
-${BOLD}Verify the ESP32 is running (from the Linux server):${NC}
-
-  mosquitto_sub -h ${LAN_IP} -p 1883 \\
-    -u decoder -P "${DECODER_PASS}" \\
-    -t 'victron/#' -v
-
-  Expected: ~3 JSON payloads/second on victron/raw once ESP32 is near devices.
-  Anonymous connect test (should be refused):
-    mosquitto_pub -h ${LAN_IP} -p 1883 -t test -m x
-
-${BOLD}Isolated test (no ESP32 needed — run on the Linux server):${NC}
-
-  docker compose -f docker-compose.yml -f docker-compose.test.yml up -d mosquitto
-  python3 decoder/replay.py --loop &
-  mosquitto_sub -h localhost -p 1883 \\
-    -u decoder -P test_decoder_pass \\
-    -t 'victron/raw' -v
-  # Should show: victron/raw {"mac": "AA:BB:CC:DD:EE:0X", "data": "..."}
-  kill %1
-  docker compose stop mosquitto
-
-${BOLD}Phase 1 complete.${NC} Proceed to Phase 2 (server infrastructure) in parallel.
-
-EOF
-}
-
-# ─── Stubs for future phases ─────────────────────────────────────────────────
-
-phase2() {
-    header "Phase 2 — Server Infrastructure"
-
-    command -v docker &>/dev/null || die "docker not found. Install Docker and re-run."
-    command -v openssl &>/dev/null || die "openssl not found."
-    [[ -f .env ]] || die ".env not found. Run ./setup.sh 1 first."
-    grep -q "^MQTT_BIND_IP=" .env || die "MQTT_BIND_IP missing from .env. Run ./setup.sh 1 first."
-
-    # Idempotency: skip credential generation if already present
-    if grep -q "^INFLUXDB_TOKEN=" .env 2>/dev/null; then
-        warn "InfluxDB credentials already in .env — skipping generation"
-    else
-        INFLUXDB_TOKEN=$(openssl rand -hex 32)
-        INFLUXDB_ADMIN_PASS=$(openssl rand -hex 16)
-        set_env INFLUXDB_TOKEN      "$INFLUXDB_TOKEN"
-        set_env INFLUXDB_ADMIN_PASS "$INFLUXDB_ADMIN_PASS"
-        ok "InfluxDB credentials generated"
-    fi
-
-    ok "Starting mosquitto and influxdb..."
-    docker compose up -d mosquitto influxdb
-
-    ok "Waiting for InfluxDB (may take ~30s on first run while init scripts execute)..."
+    # Start core services
+    step "Starting services"
+    echo -n "  Starting..."
+    docker compose up -d mosquitto influxdb >/dev/null 2>&1
     for i in $(seq 1 40); do
         docker compose exec -T influxdb influx ping &>/dev/null && break
+        echo -n "."
         sleep 3
     done
-    docker compose exec -T influxdb influx ping &>/dev/null || die "InfluxDB did not become ready in 120s"
-    ok "InfluxDB is healthy"
-
-    ok "Phase 2 complete — run ./test_phase2.sh to verify"
+    echo ""
+    docker compose exec -T influxdb influx ping &>/dev/null \
+        || die "Services did not start in time. Run: docker compose logs"
+    ok "Services running"
 }
-phase3() {
-    header "Phase 3 — BLE Decoder"
 
-    command -v docker &>/dev/null || die "docker not found. Install Docker and re-run."
-    [[ -f .env ]] || die ".env not found. Run ./setup.sh 2 first."
-    grep -q "^INFLUXDB_TOKEN=" .env || die "InfluxDB not configured. Run ./setup.sh 2 first."
+# ─── Step 2: Flash the ESP32 ─────────────────────────────────────────────────
+# esp32/secrets.yaml was written by _setup_server. The user must scp it to the
+# machine connected to the ESP32 via USB, then run esphome. After this step the
+# ESP32 publishes raw BLE payloads to the MQTT topic `victron/raw` at ~3 msg/s.
+# Board target: esp32-s3-devkitc-1. BLE duty cycle is 50% (intentional — the
+# single 2.4 GHz antenna is shared between BLE and WiFi; continuous scan causes
+# WiFi disconnects). See esp32/victron-bridge.yaml for full config.
 
-    ok "Building ble-decoder image..."
-    docker compose build ble-decoder
-
-    ok "Starting mosquitto, influxdb, and ble-decoder..."
-    docker compose up -d mosquitto influxdb ble-decoder
-
-    ok "Waiting for InfluxDB to be ready..."
-    for i in $(seq 1 40); do
-        docker compose exec -T influxdb influx ping &>/dev/null && break
-        sleep 3
-    done
-    docker compose exec -T influxdb influx ping &>/dev/null || die "InfluxDB did not become ready"
-
-    ok "Waiting for decoder to connect to MQTT..."
-    for i in $(seq 1 20); do
-        docker compose logs ble-decoder 2>/dev/null | grep -q "MQTT connected" && break
-        sleep 2
-    done
-
-    if docker compose logs ble-decoder 2>/dev/null | grep -q "MQTT connected"; then
-        ok "Decoder connected to MQTT"
-    else
-        warn "Decoder has not connected yet — check: docker compose logs ble-decoder"
-    fi
-
-    # Device discovery guidance
-    MQTT_BIND_IP=$(grep MQTT_BIND_IP .env 2>/dev/null | cut -d= -f2 || echo "<server-LAN-IP>")
-    DECODER_PASS=$(grep MQTT_DECODER_PASS .env 2>/dev/null | cut -d= -f2 || echo "<see .env>")
-
-    if [[ ! -f config/devices.json ]]; then
-        warn "config/devices.json not found — device keys not yet configured"
-        cat <<EOF
-
-${BOLD}Device Discovery (requires ESP32 near Victron devices):${NC}
-
-  python3 decoder/discover.py \\
-    --broker ${MQTT_BIND_IP} \\
-    --username decoder \\
-    --password ${DECODER_PASS} \\
-    --output config/devices.json
-
-The script will:
-  1. Listen to victron/raw for Victron advertisement MACs
-  2. Identify each device type (SolarCharger, BatterySense, etc.)
-  3. Prompt you for a label and the encryption key from VictronConnect
-
-After saving config/devices.json, restart the decoder:
-  docker compose restart ble-decoder
-
-EOF
-    else
-        DEVICE_COUNT=$(python3 -c "import json; d=json.load(open('config/devices.json')); print(len(d.get('devices',[])))" 2>/dev/null || echo "?")
-        ok "config/devices.json found (${DEVICE_COUNT} device(s) configured)"
-        ok "Restarting decoder to pick up device config..."
-        docker compose restart ble-decoder
-    fi
-
-    ok "Phase 3 setup complete — run ./test_phase3.sh to verify"
-}
-phase4() { header "Phase 4 — API Service";           die "Not yet implemented. See victron-system-design.md §12 Phase 4."; }
-phase5() { header "Phase 5 — Dashboard UI";          die "Not yet implemented. See victron-system-design.md §12 Phase 5."; }
-phase6() {
-    header "Phase 6 — Auth + TLS"
-
-    command -v docker &>/dev/null || die "docker not found."
-    [[ -f .env ]] || die ".env not found. Run ./setup.sh 2 first."
-    grep -q "^INFLUXDB_TOKEN=" .env || die "InfluxDB not configured. Run ./setup.sh 2 first."
-
-    # ── Idempotency ──────────────────────────────────────────────────────────
-    if grep -q "^DOMAIN=" .env 2>/dev/null \
-    && grep -q "^GOOGLE_CLIENT_ID=" .env 2>/dev/null; then
-        warn "Phase 6 already configured in .env — skipping interactive setup"
-        warn "Remove DOMAIN / GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / OAUTH2_COOKIE_SECRET / ALLOWED_EMAIL from .env to reconfigure."
-        _p6_regen_allowed_emails
-        ok "Restarting nginx and oauth2-proxy with existing config..."
-        docker compose up -d nginx oauth2-proxy
-        _p6_print_status
+_setup_flash() {
+    # Already flashed if secrets.yaml was consumed and ESP32 has connected
+    if [[ ! -f esp32/secrets.yaml ]]; then
+        ok "Sensor bridge already flashed"
         return
     fi
 
-    # ── 1. Domain ────────────────────────────────────────────────────────────
-    header "Domain Name"
-    echo "Enter the fully-qualified domain name for the dashboard."
-    echo "A DNS A record must already point this name to your public IP."
-    echo "Example: solar.yourdomain.com"
-    echo ""
-    read -rp "Domain: " DOMAIN
-    [[ -n "$DOMAIN" ]] || die "Domain cannot be empty."
-    set_env DOMAIN "$DOMAIN"
-    ok "Domain set to: ${BOLD}${DOMAIN}${NC}"
+    LAN_IP=$(get_env MQTT_BIND_IP)
+    SERVER_USER=$(whoami)
 
-    # ── 2. TLS certificate (DNS-01) ──────────────────────────────────────────
-    header "Let's Encrypt Certificate — DNS-01 Challenge"
-    echo "certbot will prove ownership of ${DOMAIN} by creating a TXT record via your"
-    echo "DNS provider's API. No open port 80 is required."
-    echo ""
+    hr
+    cat <<EOF
 
-    # Ensure certbot is present
-    if ! command -v certbot &>/dev/null; then
-        ok "Installing certbot..."
-        sudo apt-get update -q && sudo apt-get install -y -q certbot
+${BOLD}Flash the sensor bridge${NC}
+
+  The configuration file has been generated on this server.
+
+  On the machine connected to the ESP32 via USB, run these two commands:
+
+    ${BOLD}scp ${SERVER_USER}@${LAN_IP}:$(pwd)/esp32/secrets.yaml esp32/${NC}
+    ${BOLD}esphome run esp32/victron-bridge.yaml${NC}
+
+  (Install ESPHome first if needed:  pip install esphome)
+
+  Once flashed, place the ESP32 within ~10 m of your Victron devices
+  and power it from any USB adapter.
+
+EOF
+    read -rp "  Press Enter once the ESP32 is running and positioned near the devices... " _
+    echo ""
+}
+
+# ─── Step 3: Device encryption keys ──────────────────────────────────────────
+# Victron devices broadcast AES-128-CTR encrypted BLE advertisements. Each
+# device has a unique 32-hex-char key visible in VictronConnect: tap device →
+# ⋮ → Product Info → Encryption Key. discover.py listens to the MQTT topic
+# `victron/raw` and interactively prompts for a label and key for each new MAC.
+# Output is config/devices.json (gitignored). The ble-decoder reads this file
+# on startup; changing it requires `docker compose restart ble-decoder`.
+# discover.py also supports --duration to control how long it listens.
+
+_setup_devices() {
+    # Already done?
+    if [[ -f config/devices.json ]]; then
+        local count
+        count=$(python3 -c \
+            "import json; d=json.load(open('config/devices.json')); print(len(d.get('devices',[])))" \
+            2>/dev/null || echo 0)
+        if [[ "$count" -gt 0 ]]; then
+            ok "${count} device(s) already configured"
+            # Restart decoder to pick up any changes
+            docker compose restart ble-decoder >/dev/null 2>&1 || true
+            return
+        fi
     fi
 
-    echo "Select your DNS provider:"
-    echo "  1) Cloudflare"
-    echo "  2) DigitalOcean"
-    echo "  3) Route 53 (AWS)"
-    echo "  4) Other / manual (you'll add the TXT record yourself)"
-    read -rp "Choice [1-4]: " DNS_CHOICE
+    hr
+    cat <<EOF
 
-    EMAIL=$(git config --global user.email 2>/dev/null || true)
-    [[ -n "$EMAIL" ]] || read -rp "Email for Let's Encrypt expiry notices: " EMAIL
+${BOLD}Victron device setup${NC}
+
+  Each Victron device encrypts its data with a unique key.
+  You'll need to retrieve it from the VictronConnect app:
+
+    Open VictronConnect  →  tap the device  →  ⋮  →  Product Info  →  Encryption Key
+
+  The scan will run for up to 60 seconds. Have VictronConnect open and ready.
+
+EOF
+    read -rp "  Press Enter to start scanning for devices... " _
+    echo ""
+
+    LAN_IP=$(get_env MQTT_BIND_IP)
+    DECODER_PASS=$(get_env MQTT_DECODER_PASS)
+
+    # Build decoder image if needed
+    docker compose build ble-decoder >/dev/null 2>&1
+
+    # Start services so MQTT is available for discover.py
+    docker compose up -d mosquitto influxdb >/dev/null 2>&1
+
+    python3 decoder/discover.py \
+        --broker "$LAN_IP" \
+        --username decoder \
+        --password "$DECODER_PASS" \
+        --output config/devices.json
+
+    if [[ -f config/devices.json ]]; then
+        local count
+        count=$(python3 -c \
+            "import json; d=json.load(open('config/devices.json')); print(len(d.get('devices',[])))" \
+            2>/dev/null || echo 0)
+        if [[ "$count" -gt 0 ]]; then
+            ok "${count} device(s) configured"
+        else
+            warn "No devices saved. Re-run ./setup.sh to try again."
+        fi
+    fi
+}
+
+# ─── Step 4+5: Start decoder and dashboard ───────────────────────────────────
+# ble-decoder: subscribes to `victron/raw`, decrypts each payload using the
+#   device key from config/devices.json, timestamps on receipt (server-side
+#   authority — ESP32 has no RTC), writes to InfluxDB `victron` bucket.
+#   Has an in-memory retry buffer (500 readings, ~2.5 min at 3 msg/s) with
+#   exponential-backoff writes so InfluxDB restarts don't lose data.
+# solar-api: FastAPI app at :8080. Serves static dashboard at / and REST API
+#   at /api/v1/. Stitches raw/medium/hourly InfluxDB buckets so charts always
+#   show 1-second resolution for the last hour regardless of selected range.
+#   Caps responses at 500 points. No auth at this layer (enforced by nginx).
+
+_setup_dashboard() {
+    step "Starting data pipeline and dashboard"
+
+    docker compose up -d --build mosquitto influxdb ble-decoder solar-api >/dev/null 2>&1
+
+    # Wait for decoder to connect
+    echo -n "  Connecting to devices..."
+    for i in $(seq 1 20); do
+        docker compose logs ble-decoder 2>/dev/null | grep -q "MQTT connected" && break
+        echo -n "."
+        sleep 2
+    done
+    echo ""
+
+    # Wait for API to be healthy
+    LAN_IP=$(get_env MQTT_BIND_IP)
+    for i in $(seq 1 15); do
+        curl -sf "http://localhost:8080/health" >/dev/null 2>&1 && break
+        sleep 2
+    done
+
+    if curl -sf "http://localhost:8080/health" >/dev/null 2>&1; then
+        ok "Dashboard is live"
+        echo ""
+        echo -e "  ${BOLD}Local access:${NC}  http://${LAN_IP}:8080/"
+    else
+        warn "Dashboard did not start cleanly. Check: docker compose logs solar-api"
+    fi
+}
+
+# ─── Step 6: Remote access (TLS + Google OAuth) ──────────────────────────────
+# nginx: terminates TLS on :8443, forwards all traffic to oauth2-proxy.
+#   Certificate from Let's Encrypt via DNS-01 challenge (no port 80 needed).
+#   Supports Cloudflare, DigitalOcean, Route53, or manual TXT record.
+#   Sets X-Forwarded-Port: 8443 so oauth2-proxy builds the correct redirect URI.
+# oauth2-proxy v7.6.0: enforces Google OAuth. Pinned version — v7.x latest
+#   ignores OAUTH2_PROXY_UPSTREAM env var (pflag strings-slice bug); upstream
+#   must be passed as CLI arg `command: "--upstream=http://solar-api:8080/"`.
+#   Cookie SameSite=lax is required (strict blocks the Google OAuth redirect).
+#   Allowed accounts are listed in config/allowed_emails (one email per line),
+#   regenerated from ALLOWED_EMAIL in .env on every run of this script.
+# Port forward required: router WAN:8443 → server LAN:8443 (TCP).
+
+_setup_remote_access() {
+    # Already configured?
+    if [[ -n "$(get_env DOMAIN)" && -n "$(get_env GOOGLE_CLIENT_ID)" ]]; then
+        _p6_regen_allowed_emails
+        docker compose up -d nginx oauth2-proxy >/dev/null 2>&1
+        _p6_print_done
+        return
+    fi
+
+    hr
+    cat <<EOF
+
+${BOLD}Remote access setup (optional)${NC}
+
+  This step sets up HTTPS and Google sign-in so you can reach the dashboard
+  from anywhere. Press Ctrl+C to skip and use local access only.
+
+EOF
+    read -rp "  Press Enter to continue with remote access setup... " _
+
+    # Domain
+    echo ""
+    echo "  Enter your domain name (e.g. solar.yourdomain.com)."
+    echo "  A DNS A record must already point it to your public IP."
+    echo ""
+    read -rp "  Domain: " DOMAIN
+    [[ -n "$DOMAIN" ]] || die "Domain cannot be empty."
+    set_env DOMAIN "$DOMAIN"
+
+    # TLS certificate
+    _setup_tls "$DOMAIN"
+
+    # Google OAuth
+    _setup_oauth "$DOMAIN"
+
+    # Allowed email
+    echo ""
+    echo "  Enter the Google account email address that will have access."
+    echo ""
+    read -rp "  Your email: " ALLOWED_EMAIL
+    [[ -n "$ALLOWED_EMAIL" ]] || die "Email cannot be empty."
+    set_env ALLOWED_EMAIL "$ALLOWED_EMAIL"
+    _p6_regen_allowed_emails
+
+    # Start
+    step "Enabling HTTPS and sign-in"
+    docker compose up -d nginx oauth2-proxy >/dev/null 2>&1
+
+    echo -n "  Waiting for HTTPS to become ready..."
+    for i in $(seq 1 15); do
+        docker compose ps nginx 2>/dev/null | grep -q "running\|Up" && break
+        echo -n "."
+        sleep 2
+    done
+    echo ""
+
+    _p6_print_done
+}
+
+_setup_tls() {
+    local domain="$1"
+
+    if [[ -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]]; then
+        ok "TLS certificate already exists for ${domain}"
+        _p6_setup_renewal_hook
+        return
+    fi
+
+    step "Obtaining TLS certificate"
+    echo ""
+    echo "  A certificate will be obtained automatically via your DNS provider."
+    echo "  No port 80 needs to be open."
+    echo ""
+
+    command -v certbot &>/dev/null || {
+        echo -n "  Installing certbot..."
+        sudo apt-get update -q && sudo apt-get install -y -q certbot
+        echo ""
+    }
+
+    echo "  Select your DNS provider:"
+    echo "    1) Cloudflare"
+    echo "    2) DigitalOcean"
+    echo "    3) Route 53 (AWS)"
+    echo "    4) Other (you'll add the DNS TXT record yourself)"
+    echo ""
+    read -rp "  Choice [1-4]: " DNS_CHOICE
+
+    read -rp "  Email for certificate renewal notices: " CERT_EMAIL
+    [[ -n "$CERT_EMAIL" ]] || die "Email cannot be empty."
 
     case "$DNS_CHOICE" in
-        1) _p6_certbot_cloudflare  "$DOMAIN" "$EMAIL" ;;
-        2) _p6_certbot_digitalocean "$DOMAIN" "$EMAIL" ;;
-        3) _p6_certbot_route53      "$DOMAIN" "$EMAIL" ;;
-        4) _p6_certbot_manual       "$DOMAIN" "$EMAIL" ;;
+        1) _p6_certbot_cloudflare    "$domain" "$CERT_EMAIL" ;;
+        2) _p6_certbot_digitalocean  "$domain" "$CERT_EMAIL" ;;
+        3) _p6_certbot_route53       "$domain" "$CERT_EMAIL" ;;
+        4) _p6_certbot_manual        "$domain" "$CERT_EMAIL" ;;
         *) die "Invalid choice." ;;
     esac
 
-    # ── 3. Certbot auto-renewal hook ─────────────────────────────────────────
     _p6_setup_renewal_hook
+}
 
-    # ── 4. Google OAuth credentials ──────────────────────────────────────────
-    header "Google OAuth 2.0 Credentials"
-    REDIRECT_URI="https://${DOMAIN}:8443/oauth2/callback"
+_setup_oauth() {
+    local domain="$1"
+    local redirect_uri="https://${domain}:8443/oauth2/callback"
+
+    step "Google sign-in setup"
     cat <<EOF
 
-${BOLD}Step 1 — Create an OAuth 2.0 Client ID in Google Cloud Console:${NC}
+  Create an OAuth app at: ${BOLD}https://console.cloud.google.com/apis/credentials${NC}
 
-  URL: https://console.cloud.google.com/apis/credentials
-  → Create Credentials → OAuth 2.0 Client ID
-  → Application type: Web application
-  → Authorized redirect URIs → Add exactly:
+    → Create Credentials → OAuth 2.0 Client ID
+    → Application type: Web application
+    → Authorized redirect URIs → add exactly:
 
-      ${BOLD}${REDIRECT_URI}${NC}
+        ${BOLD}${redirect_uri}${NC}
 
-  → Create → copy the Client ID and Client Secret.
+    → Create → copy the Client ID and Client Secret
 
 EOF
-    read -rp "Press Enter once you have the Client ID and Secret ready... " _
-    read -rp  "Google OAuth Client ID:     " GOOGLE_CLIENT_ID
-    read -rsp "Google OAuth Client Secret: " GOOGLE_CLIENT_SECRET
+    read -rp "  Press Enter once you have the Client ID and Secret... " _
     echo ""
+    read -rp "  Client ID:     " GOOGLE_CLIENT_ID
+    read -rsp "  Client Secret: " GOOGLE_CLIENT_SECRET; echo ""
     [[ -n "$GOOGLE_CLIENT_ID" ]]     || die "Client ID cannot be empty."
     [[ -n "$GOOGLE_CLIENT_SECRET" ]] || die "Client Secret cannot be empty."
 
@@ -336,39 +461,57 @@ EOF
     set_env GOOGLE_CLIENT_ID     "$GOOGLE_CLIENT_ID"
     set_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
     set_env OAUTH2_COOKIE_SECRET "$OAUTH2_COOKIE_SECRET"
-    ok "OAuth credentials saved to .env"
-
-    # ── 5. Allowed email ─────────────────────────────────────────────────────
-    header "Allowed Email"
-    echo "Enter the Google account email address that will have access to the dashboard."
-    echo "Only this address will be permitted; all other accounts will receive 403."
-    echo ""
-    read -rp "Allowed email: " ALLOWED_EMAIL
-    [[ -n "$ALLOWED_EMAIL" ]] || die "Allowed email cannot be empty."
-    set_env ALLOWED_EMAIL "$ALLOWED_EMAIL"
-    _p6_regen_allowed_emails
-    ok "Allowed email written to config/allowed_emails"
-
-    # ── 6. Start nginx + oauth2-proxy ────────────────────────────────────────
-    header "Starting Auth + TLS Stack"
-    docker compose up -d nginx oauth2-proxy
-
-    ok "Waiting for nginx to become healthy..."
-    for i in $(seq 1 15); do
-        docker compose ps nginx 2>/dev/null | grep -q "running\|Up" && break
-        sleep 2
-    done
-
-    _p6_print_status
+    ok "Sign-in configured"
 }
 
 _p6_regen_allowed_emails() {
     local email
-    email=$(grep "^ALLOWED_EMAIL=" .env 2>/dev/null | cut -d= -f2)
+    email=$(get_env ALLOWED_EMAIL)
     if [[ -n "$email" ]]; then
         mkdir -p config
         printf '%s\n' "$email" > config/allowed_emails
     fi
+}
+
+_p6_setup_renewal_hook() {
+    local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
+    local project_dir; project_dir="$(pwd)"
+    sudo mkdir -p "$hook_dir"
+    sudo bash -c "cat > ${hook_dir}/reload.sh" <<EOF
+#!/bin/bash
+cd ${project_dir}
+docker compose exec -T nginx nginx -s reload
+EOF
+    sudo chmod +x "${hook_dir}/reload.sh"
+    sudo systemctl enable --now certbot.timer 2>/dev/null || true
+}
+
+_p6_print_done() {
+    local domain;  domain=$(get_env DOMAIN)
+    local lan_ip;  lan_ip=$(get_env MQTT_BIND_IP)
+
+    # Verify HTTPS silently
+    local https_ok=false
+    curl -sf --max-time 5 "https://${domain}:8443/health" >/dev/null 2>&1 && https_ok=true
+
+    hr
+    echo ""
+    echo -e "  ${BOLD}Setup complete.${NC}"
+    echo ""
+    if $https_ok; then
+        ok "HTTPS is working"
+        echo ""
+        echo -e "  ${BOLD}Dashboard:${NC}  https://${domain}:8443/"
+    else
+        warn "HTTPS not reachable yet"
+        echo ""
+        echo -e "  ${BOLD}Dashboard:${NC}  https://${domain}:8443/"
+        echo ""
+        echo "  If you haven't already, forward port 8443 on your router to ${lan_ip}."
+    fi
+    echo ""
+    echo -e "  ${BOLD}Local:${NC}      http://${lan_ip}:8080/  (no sign-in required on your LAN)"
+    echo ""
 }
 
 _p6_certbot_cloudflare() {
@@ -377,24 +520,19 @@ _p6_certbot_cloudflare() {
         || sudo apt-get install -y -q python3-certbot-dns-cloudflare
 
     echo ""
-    echo "Create a Cloudflare API Token with permissions:"
-    echo "  Zone — Zone — Read"
-    echo "  Zone — DNS  — Edit"
-    echo "(Account → My Profile → API Tokens → Create Token)"
-    read -rsp "Cloudflare API Token: " CF_TOKEN
+    echo "  Create a Cloudflare API Token (Zone → DNS → Edit) at:"
+    echo "  Account → My Profile → API Tokens → Create Token"
     echo ""
+    read -rsp "  Cloudflare API Token: " CF_TOKEN; echo ""
 
     local creds="/etc/letsencrypt/cloudflare.ini"
     sudo bash -c "printf 'dns_cloudflare_api_token = %s\n' '${CF_TOKEN}' > ${creds}"
     sudo chmod 600 "$creds"
-
     sudo certbot certonly \
-        --dns-cloudflare \
-        --dns-cloudflare-credentials "$creds" \
+        --dns-cloudflare --dns-cloudflare-credentials "$creds" \
         --dns-cloudflare-propagation-seconds 30 \
-        -d "$domain" \
-        --non-interactive --agree-tos --email "$email"
-    ok "Certificate issued for ${domain}"
+        -d "$domain" --non-interactive --agree-tos --email "$email"
+    ok "Certificate issued"
 }
 
 _p6_certbot_digitalocean() {
@@ -403,22 +541,19 @@ _p6_certbot_digitalocean() {
         || sudo apt-get install -y -q python3-certbot-dns-digitalocean
 
     echo ""
-    echo "Create a DigitalOcean Personal Access Token (write scope) at:"
+    echo "  Create a Personal Access Token (write scope) at:"
     echo "  https://cloud.digitalocean.com/account/api/tokens"
-    read -rsp "DigitalOcean API Token: " DO_TOKEN
     echo ""
+    read -rsp "  DigitalOcean API Token: " DO_TOKEN; echo ""
 
     local creds="/etc/letsencrypt/digitalocean.ini"
     sudo bash -c "printf 'dns_digitalocean_token = %s\n' '${DO_TOKEN}' > ${creds}"
     sudo chmod 600 "$creds"
-
     sudo certbot certonly \
-        --dns-digitalocean \
-        --dns-digitalocean-credentials "$creds" \
+        --dns-digitalocean --dns-digitalocean-credentials "$creds" \
         --dns-digitalocean-propagation-seconds 30 \
-        -d "$domain" \
-        --non-interactive --agree-tos --email "$email"
-    ok "Certificate issued for ${domain}"
+        -d "$domain" --non-interactive --agree-tos --email "$email"
+    ok "Certificate issued"
 }
 
 _p6_certbot_route53() {
@@ -427,105 +562,43 @@ _p6_certbot_route53() {
         || sudo apt-get install -y -q python3-certbot-dns-route53
 
     echo ""
-    echo "Route 53 DNS-01 uses your AWS credentials (~/.aws/credentials or env vars)."
-    echo "The IAM user needs: route53:ChangeResourceRecordSets, route53:ListHostedZones,"
-    echo "route53:GetChange on the hosted zone for ${domain}."
+    echo "  The IAM user needs: route53:ChangeResourceRecordSets,"
+    echo "  route53:ListHostedZones, route53:GetChange on the zone for ${domain}."
     echo ""
-    read -rp "AWS_ACCESS_KEY_ID:     " AWS_ACCESS_KEY_ID
-    read -rsp "AWS_SECRET_ACCESS_KEY: " AWS_SECRET_ACCESS_KEY
-    echo ""
+    read -rp  "  AWS Access Key ID:     " AWS_ACCESS_KEY_ID
+    read -rsp "  AWS Secret Access Key: " AWS_SECRET_ACCESS_KEY; echo ""
 
     sudo AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
          AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-         certbot certonly \
-        --dns-route53 \
-        -d "$domain" \
-        --non-interactive --agree-tos --email "$email"
-    ok "Certificate issued for ${domain}"
+         certbot certonly --dns-route53 \
+        -d "$domain" --non-interactive --agree-tos --email "$email"
+    ok "Certificate issued"
 }
 
 _p6_certbot_manual() {
     local domain="$1" email="$2"
-    cat <<EOF
-
-${BOLD}Manual DNS-01 challenge:${NC}
-certbot will print a TXT record value. Add it to your DNS, wait ~60 s for
-propagation, then press Enter to continue.
-
-EOF
+    echo ""
+    echo "  certbot will show a DNS TXT record value to add."
+    echo "  Add it in your DNS provider, wait ~60 s, then press Enter."
+    echo ""
     sudo certbot certonly \
-        --manual \
-        --preferred-challenges dns \
-        -d "$domain" \
-        --agree-tos --email "$email"
-    ok "Certificate issued for ${domain}"
+        --manual --preferred-challenges dns \
+        -d "$domain" --agree-tos --email "$email"
+    ok "Certificate issued"
 }
 
-_p6_setup_renewal_hook() {
-    local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
-    local hook_file="${hook_dir}/reload-nginx.sh"
-    local project_dir
-    project_dir="$(pwd)"
+# ─── Main ─────────────────────────────────────────────────────────────────────
 
-    sudo mkdir -p "$hook_dir"
-    sudo bash -c "cat > ${hook_file}" <<EOF
-#!/bin/bash
-cd ${project_dir}
-docker compose exec -T nginx nginx -s reload
-EOF
-    sudo chmod +x "$hook_file"
-    sudo systemctl enable --now certbot.timer 2>/dev/null || true
-    ok "Certbot renewal hook installed; certbot.timer enabled"
+main() {
+    echo ""
+    echo -e "${BOLD}Solar Monitor Setup${NC}"
+    echo -e "────────────────────"
+
+    _setup_server
+    _setup_flash
+    _setup_devices
+    _setup_dashboard
+    _setup_remote_access
 }
 
-_p6_print_status() {
-    local DOMAIN
-    DOMAIN=$(grep "^DOMAIN=" .env 2>/dev/null | cut -d= -f2 || echo "<domain>")
-    local LAN_IP
-    LAN_IP=$(grep "^MQTT_BIND_IP=" .env 2>/dev/null | cut -d= -f2 || hostname -I | awk '{print $1}')
-
-    cat <<EOF
-
-${BOLD}── Router Port-Forward (Ubiquiti UniFi) ─────────────────────────────────────${NC}
-
-  Settings → Security (or Routing & Firewall) → Port Forwarding → Add rule:
-
-    Name:         victron-dashboard
-    Interface:    WAN
-    Port:         8443
-    Forward IP:   ${LAN_IP}
-    Forward Port: 8443
-    Protocol:     TCP
-
-${BOLD}── Verify ────────────────────────────────────────────────────────────────────${NC}
-
-  curl -sI https://${DOMAIN}:8443/health
-    → expect: HTTP/2 200 with Strict-Transport-Security header
-    → browser opens Google sign-in before reaching /health
-
-  systemctl status certbot.timer
-    → should show: active (waiting)
-
-${BOLD}── Dashboard ─────────────────────────────────────────────────────────────────${NC}
-
-  https://${DOMAIN}:8443/
-
-  Note: LAN access without auth is still available at http://${LAN_IP}:8080/
-  To restrict it: remove solar-api ports from docker-compose.yml and re-deploy.
-
-EOF
-    ok "Phase 6 setup complete."
-}
-
-# ─── Entry point ─────────────────────────────────────────────────────────────
-
-PHASE="${1:-1}"
-case "$PHASE" in
-    1) phase1 ;;
-    2) phase2 ;;
-    3) phase3 ;;
-    4) phase4 ;;
-    5) phase5 ;;
-    6) phase6 ;;
-    *) echo "Usage: $0 [1-6]"; exit 1 ;;
-esac
+main
