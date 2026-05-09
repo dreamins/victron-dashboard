@@ -384,6 +384,42 @@ Phases 1–6 are complete (see v4.3 design doc). The following are new:
 - Home installation live: InfluxDB points have `site=home` tag
 - `GET /api/v1/sites` returns site list (requires API changes from Phase 9)
 
+### Phase 7.5 — Historical data migration
+
+**Goal:** All existing InfluxDB records gain `site=home` tag before the second site is added. Charts remain unbroken throughout.
+
+**Preconditions (all must be true before this phase starts):**
+- Phase 7 deployed and verified: decoder writing `site=home` on all new live data
+- API confirmed working: dashboard charts show current data correctly
+- `migrate_site_tags.py` reviewed and committed to repo
+
+**Migration steps (in order, no step skipped):**
+
+1. Confirm live decoder is tagging new writes: spot-check InfluxDB for recent points with `site=home`
+2. Run migration against `victron_test` bucket first as a dry run (seeded data, low stakes)
+3. Run migration against `victron_hourly` (1,062 records — fastest, confirms the script works end-to-end)
+4. Run migration against `victron_medium` (12,404 records)
+5. Run migration against `victron` raw bucket (5,005,083 records — longest step)
+6. After each bucket: verify record count matches pre-migration count, spot-check that `site=home` tag is present
+7. Confirm dashboard charts still work after each bucket migration
+8. Confirm API `?site=home` filter returns data
+
+**Migration script (`migrate_site_tags.py`) design:**
+- Safe checkpoint: writes to a temp bucket first, verifies count ≥ 99% of original, then deletes original, then copies back
+- If the script crashes at any point, the temp bucket survives as a checkpoint and re-running resumes safely
+- Runs inside the `solar-api` container (influxdb-client already installed)
+- `MIGRATION_SITE` env var controls which site tag to apply (defaults to `home`)
+- Does NOT touch the running decoder or API — zero downtime
+
+**Acceptance:**
+- All three production buckets: record count after = record count before (within 1%)
+- Every record in every bucket has `site=home` tag
+- Dashboard charts unaffected (no visible gap or discontinuity)
+- API `GET /api/v1/history?site=home&device=...` returns full history
+- Migration script deleted from repo after successful run (it is a one-time tool)
+
+---
+
 ### Phase 8 — Linux BLE bridge (Victron scanning)
 
 **Goal:** Garage Victron MPPTs decode and write to InfluxDB without an ESP32.
