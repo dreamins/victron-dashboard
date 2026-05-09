@@ -78,6 +78,17 @@ die()  { echo -e "\n  ${RED}✗${NC}  $*\n" >&2; exit 1; }
 step() { echo -e "\n${BOLD}${CYAN}▸ $*${NC}"; }
 hr()   { echo -e "\n${BOLD}────────────────────────────────────────────────${NC}"; }
 
+# Install a package if the command is not already present.
+_ensure() {
+    local cmd="$1" pkg="$2"
+    command -v "$cmd" &>/dev/null && return
+    echo -n "  Installing ${pkg}..."
+    sudo apt-get update -q && sudo apt-get install -y -q "$pkg" >/dev/null 2>&1 \
+        || die "Could not install ${pkg}. Install it manually and re-run."
+    echo ""
+    ok "${pkg} installed"
+}
+
 set_env() {
     local key="$1" val="$2"
     touch .env
@@ -101,9 +112,9 @@ _setup_server() {
         return
     fi
 
-    command -v docker  &>/dev/null || die "Docker is not installed. Install Docker and re-run."
-    command -v openssl &>/dev/null || die "openssl not found. Install it and re-run."
-    command -v nmcli   &>/dev/null || die "nmcli not found (NetworkManager). Install it and re-run."
+    _ensure docker  "docker.io"
+    _ensure openssl "openssl"
+    _ensure nmcli   "network-manager"
 
     # Detect server IP
     step "Detecting server address"
@@ -404,11 +415,7 @@ _setup_tls() {
     echo "  No port 80 needs to be open."
     echo ""
 
-    command -v certbot &>/dev/null || {
-        echo -n "  Installing certbot..."
-        sudo apt-get update -q && sudo apt-get install -y -q certbot
-        echo ""
-    }
+    _ensure certbot "certbot"
 
     echo "  Select your DNS provider:"
     echo "    1) Cloudflare"
