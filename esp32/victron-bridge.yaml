@@ -1,5 +1,6 @@
 substitutions:
   name: victron-bridge
+  site_id: home
 
 esphome:
   name: ${name}
@@ -38,11 +39,11 @@ mqtt:
   username: !secret mqtt_username
   password: !secret mqtt_password
   birth_message:
-    topic: victron/bridge/status
+    topic: victron/${site_id}/bridge/status
     payload: online
     retain: true
   will_message:
-    topic: victron/bridge/status
+    topic: victron/${site_id}/bridge/status
     payload: offline
     retain: true
 
@@ -67,7 +68,7 @@ esp32_ble_tracker:
                 hex += buf;
               }
               std::string payload = "{\"mac\":\"" + mac + "\",\"data\":\"" + hex + "\"}";
-              id(mqtt_client).publish("victron/raw", payload);
+              id(mqtt_client).publish("victron/${site_id}/raw", payload);
               break;
             }
           }
@@ -79,5 +80,5 @@ sensor:
     on_value:
       then:
         - mqtt.publish:
-            topic: victron/bridge/rssi
+            topic: victron/${site_id}/bridge/rssi
             payload: !lambda 'return str_sprintf("%.1f", x);'

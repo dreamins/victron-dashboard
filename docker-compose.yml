@@ -51,8 +51,9 @@ services:
       - INFLUX_TOKEN=${INFLUXDB_TOKEN}
       - INFLUX_ORG=home
       - INFLUX_BUCKET=victron
+      - SITES_FILE=/app/sites.json
     volumes:
-      - ./config/devices.json:/app/devices.json:ro
+      - ./config/sites.json:/app/sites.json:ro
     restart: unless-stopped
 
   solar-api:

@@ -1,0 +1,38 @@
+{
+  "sites": [
+    {
+      "id": "test",
+      "label": "Test Site",
+      "tz_offset_hours": 0,
+      "bridge": "esp32",
+      "ui": {
+        "show_loads": true,
+        "battery_display": "sense",
+        "mppt_count": 2
+      },
+      "devices": [
+        {
+          "id": "test_mppt1",
+          "label": "Test MPPT North",
+          "type": "victron_mppt",
+          "mac": "AA:BB:CC:DD:EE:01",
+          "key": "aabbccddeeff00112233445566778899"
+        },
+        {
+          "id": "test_mppt2",
+          "label": "Test MPPT South",
+          "type": "victron_mppt",
+          "mac": "AA:BB:CC:DD:EE:02",
+          "key": "bbccddeeff00112233445566778899aa"
+        },
+        {
+          "id": "test_battery_sense",
+          "label": "Test Battery Bank",
+          "type": "victron_battery_sense",
+          "mac": "AA:BB:CC:DD:EE:03",
+          "key": "ccddeeff00112233445566778899aabb"
+        }
+      ]
+    }
+  ]
+}

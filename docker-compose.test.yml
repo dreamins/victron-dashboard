@@ -8,16 +8,20 @@ services:
 
   ble-decoder:
     volumes:
-      - ./decoder/fixtures/devices_fixture.json:/app/devices.json:ro
+      - ./decoder/fixtures/sites_fixture.json:/app/sites.json:ro
       - ./decoder/fixtures:/app/fixtures:ro
     environment:
       - MQTT_PASSWORD=test_decoder_pass
       - INFLUX_BUCKET=victron_test
+      - SITES_FILE=/app/sites.json
 
   solar-api:
     ports:
       - "8081:8080"
+    volumes:
+      - ./api/tests/sites_fixture.json:/app/sites_fixture.json:ro
     environment:
       - INFLUX_BUCKET=victron_test
       - INFLUX_BUCKET_MEDIUM=victron_test
       - INFLUX_BUCKET_HOURLY=victron_test
+      - SITES_FILE=/app/sites_fixture.json

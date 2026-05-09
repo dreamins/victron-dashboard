@@ -1,0 +1,38 @@
+{
+  "sites": [
+    {
+      "id": "home",
+      "label": "Home Solar",
+      "tz_offset_hours": 0,
+      "bridge": "esp32",
+      "ui": {
+        "show_loads": true,
+        "battery_display": "sense",
+        "mppt_count": 2
+      },
+      "devices": [
+        {
+          "id": "mppt_1",
+          "label": "MPPT South",
+          "type": "victron_mppt",
+          "mac": "AA:BB:CC:DD:EE:FF",
+          "key": "00112233445566778899aabbccddeeff"
+        },
+        {
+          "id": "mppt_2",
+          "label": "MPPT East",
+          "type": "victron_mppt",
+          "mac": "AA:BB:CC:DD:EE:FF",
+          "key": "00112233445566778899aabbccddeeff"
+        },
+        {
+          "id": "battery_sense",
+          "label": "Battery",
+          "type": "victron_battery_sense",
+          "mac": "AA:BB:CC:DD:EE:FF",
+          "key": "00112233445566778899aabbccddeeff"
+        }
+      ]
+    }
+  ]
+}

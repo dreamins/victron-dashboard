@@ -243,3 +243,88 @@ def test_daily_today_only_date_is_today():
     days = r.json()["days"]
     if days:
         assert days[0]["date"] == today, f"Expected date={today}, got {days[0]['date']}"
+
+
+# ─── Phase 7: /sites ──────────────────────────────────────────────────────────
+
+def test_sites_returns_200():
+    r = get("/api/v1/sites")
+    assert r.status_code == 200
+
+
+def test_sites_structure():
+    r = get("/api/v1/sites")
+    body = r.json()
+    assert "sites" in body
+    for s in body["sites"]:
+        assert "id" in s
+        assert "label" in s
+        assert "bridge" in s
+        assert "ui" in s
+        assert "device_types" in s
+        # Must NOT expose secrets
+        assert "mac" not in s
+        assert "key" not in s
+
+
+def test_sites_contains_test_site():
+    r = get("/api/v1/sites")
+    ids = {s["id"] for s in r.json()["sites"]}
+    assert "test" in ids
+
+
+def test_sites_no_mac_or_key_leaked():
+    """Secrets must never appear anywhere in the /sites response."""
+    body = get("/api/v1/sites").text
+    assert "AA:BB:CC:DD:EE" not in body
+    assert "aabbccddeeff" not in body
+
+
+# ─── Phase 7: site filter on existing endpoints ───────────────────────────────
+
+def test_devices_site_filter_known_site():
+    r = get("/api/v1/devices", site="test")
+    assert r.status_code == 200
+    body = r.json()
+    assert "devices" in body
+    # Seeded data has site=test — all returned devices belong to it
+    ids = {d["id"] for d in body["devices"]}
+    assert "test_mppt1" in ids
+
+
+def test_devices_unknown_site_returns_empty():
+    r = get("/api/v1/devices", site="nonexistent_site_xyz")
+    assert r.status_code == 200
+    assert r.json()["devices"] == []
+
+
+def test_history_site_filter():
+    r = get("/api/v1/history", device="test_mppt1", field="pv_power",
+            start="-3d", interval="1h", site="test")
+    assert r.status_code == 200
+    assert len(r.json()["points"]) > 0
+
+
+def test_history_wrong_site_returns_no_points():
+    r = get("/api/v1/history", device="test_mppt1", field="pv_power",
+            start="-3d", interval="1h", site="nonexistent_site_xyz")
+    assert r.status_code == 200
+    assert r.json()["points"] == []
+
+
+def test_daily_site_filter():
+    r = get("/api/v1/daily", days=3, site="test")
+    assert r.status_code == 200
+    assert len(r.json()["days"]) > 0
+
+
+def test_daily_wrong_site_returns_empty():
+    r = get("/api/v1/daily", days=3, site="nonexistent_site_xyz")
+    assert r.status_code == 200
+    assert r.json()["days"] == []
+
+
+def test_current_site_filter():
+    r = get("/api/v1/current", site="test")
+    assert r.status_code == 200
+    assert "test_mppt1" in r.json()

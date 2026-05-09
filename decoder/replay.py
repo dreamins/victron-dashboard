@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--port", type=int, default=1883)
     parser.add_argument("--username", default="esp32-bridge")
     parser.add_argument("--password", default="test_esp32_pass")
+    parser.add_argument("--site", default="test", help="Site ID — publishes to victron/{site}/raw")
     parser.add_argument("--rate", type=float, default=3.0, help="Messages/second across all devices")
     parser.add_argument("--loop", action="store_true", help="Loop fixture indefinitely")
     parser.add_argument("--duration", type=float, default=0,
@@ -66,7 +67,7 @@ def main():
                 payload = json.dumps(msg)
                 mac = msg.get("mac", "?")
                 size = len(msg.get("data", "")) // 2 if "data" in msg else "-"
-                client.publish("victron/raw", payload).wait_for_publish()
+                client.publish(f"victron/{args.site}/raw", payload).wait_for_publish()
                 total += 1
                 print(f"[{total}] {mac}  {size}B", flush=True)
                 time.sleep(interval)

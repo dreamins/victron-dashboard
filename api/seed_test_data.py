@@ -12,10 +12,11 @@ from datetime import datetime, timezone, timedelta
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-INFLUX_URL = os.environ.get("INFLUX_URL", "http://influxdb:8086")
-INFLUX_TOKEN = os.environ["INFLUX_TOKEN"]
-INFLUX_ORG = os.environ.get("INFLUX_ORG", "home")
+INFLUX_URL    = os.environ.get("INFLUX_URL", "http://influxdb:8086")
+INFLUX_TOKEN  = os.environ["INFLUX_TOKEN"]
+INFLUX_ORG    = os.environ.get("INFLUX_ORG", "home")
 INFLUX_BUCKET = os.environ.get("INFLUX_BUCKET", "victron_test")
+SITE          = os.environ.get("SEED_SITE", "test")
 
 DEVICES = {
     "test_mppt1": {"label": "Test-MPPT1", "peak_wh": 1500.0, "peak_w": 250.0},
@@ -85,6 +86,7 @@ def main():
                 Point("solar")
                 .tag("device", dev_id)
                 .tag("label", info["label"])
+                .tag("site", SITE)
                 .field("pv_power", float(pv_w))
                 .field("pv_voltage", float(17.0 + sf * 2.0))
                 .field("battery_voltage", float(batt_v))
@@ -101,6 +103,7 @@ def main():
             Point("solar")
             .tag("device", "test_battery_sense")
             .tag("label", DEVICES["test_battery_sense"]["label"])
+            .tag("site", SITE)
             .field("battery_voltage", float(12.5 + 1.9 * sf))
             .field("temperature", float(temp))
             .time(t, "s")
