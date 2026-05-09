@@ -103,7 +103,7 @@ from(bucket: "{INFLUX_BUCKET}")
     def get_current(self) -> Dict[str, Any]:
         q = f"""
 from(bucket: "{INFLUX_BUCKET}")
-  |> range(start: -2m)
+  |> range(start: -7d)
   |> group(columns: ["device", "label", "_field"])
   |> last()
 """

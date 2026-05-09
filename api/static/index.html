@@ -478,13 +478,34 @@ async function poll(){
 // ── Tab definitions (built from real device data) ─────────────────────────
 
 function buildTabDefs(){
-  // Always: one tab per MPPT, one Battery tab, one Insights tab
+  // Always: one tab per MPPT, one Battery tab, one Insights tab.
+  // Falls back to S.devices so tabs appear even when bridge is offline
+  // and get_current returns nothing (S.current is empty).
   const defs=[];
-  S.mptts.forEach((id,i)=>{
-    defs.push({id, label:S.current[id]?.label||id, kind:'mppt', idx:i});
+
+  let mptts = S.mptts;
+  let bsense = S.bsense;
+  if(mptts.length===0 && S.devices.length>0){
+    // Bridge offline — derive structure from device list instead
+    mptts = S.devices.filter(d=>'charge_state' in (S.current[d.id]?.fields||{}) ||
+      !S.devices.some(x=>x.id===d.id && 'temperature' in (S.current[x.id]?.fields||{})))
+      .map(d=>d.id);
+    // For a cold start where S.current is truly empty, classify by process of
+    // elimination: Battery Sense devices typically have temperature but no
+    // charge_state. With no current data at all, treat all non-bsense as MPPT.
+    const bsenseDevice = S.devices.find(d=>
+      S.current[d.id] && 'temperature' in (S.current[d.id].fields||{}) && !('charge_state' in (S.current[d.id].fields||{}))
+    );
+    if(bsenseDevice) bsense = bsenseDevice.id;
+    mptts = S.devices.filter(d=>d.id !== (bsenseDevice?.id)).map(d=>d.id);
+  }
+
+  mptts.forEach((id,i)=>{
+    const label = S.current[id]?.label || S.devices.find(d=>d.id===id)?.label || id;
+    defs.push({id, label, kind:'mppt', idx:i});
   });
-  if(S.bsense||S.mptts.length>0){
-    defs.push({id:S.bsense||'battery', label:'Battery', kind:'battery', idx:defs.length});
+  if(bsense||mptts.length>0){
+    defs.push({id:bsense||'battery', label:'Battery', kind:'battery', idx:defs.length});
   }
   defs.push({id:'insights', label:'Insights', kind:'insights', idx:defs.length});
   S.tabDefs=defs;
