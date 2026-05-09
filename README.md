@@ -71,19 +71,6 @@ When it finishes, forward port **8443 TCP** on your router to the server's LAN I
 
 ---
 
-## Adding screenshots
-
-Drop screenshots of your running dashboard into `docs/screenshots/`:
-
-| File | What to capture |
-|---|---|
-| `dashboard-dark.png` | Main view, dark theme, at least one device live |
-| `dashboard-light.png` | Same, light theme |
-| `charts.png` | Charts tab, any time range |
-| `daily-yield.png` | Daily yield tab |
-
----
-
 ## License
 
 MIT

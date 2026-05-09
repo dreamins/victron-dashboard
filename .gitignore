@@ -13,3 +13,5 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+docs/take_screenshots.py
