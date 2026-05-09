@@ -171,41 +171,68 @@ from(bucket: "{bucket}")
         }
 
     def get_daily(self, days: int, offset: timedelta, today_only: bool = False) -> List[Dict[str, Any]]:
-        # Use medium bucket (5-min resolution) for multi-day queries — 288× fewer rows
-        # vs the raw bucket, and yield_today is MAX-aggregated so daily peak is preserved.
+        # yield_today is a cumulative counter that resets at local midnight.
+        # "Today's yield" = last recorded value since local midnight (1 row per device).
+        # Multi-day: aggregateWindow(1d, max) in Flux so InfluxDB does the grouping;
+        # offset shifts window boundaries from UTC midnight to local midnight.
         if today_only:
             now_local = datetime.now(timezone.utc) + offset
             midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
             midnight_utc = midnight_local - offset
             start_str = midnight_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
-            bucket = INFLUX_BUCKET
-        else:
-            start_str = f"-{days}d"
-            bucket = INFLUX_BUCKET_MEDIUM if days > 1 else INFLUX_BUCKET
-        q = f"""
-from(bucket: "{bucket}")
+            # last() returns one row per device — no Python aggregation needed.
+            q = f"""
+from(bucket: "{INFLUX_BUCKET}")
   |> range(start: {start_str})
   |> filter(fn: (r) => r._measurement == "solar" and r._field == "yield_today")
   |> group(columns: ["device"])
+  |> last()
+"""
+            tables = self.query_api.query(q)
+            date_str = (datetime.now(timezone.utc) + offset).strftime("%Y-%m-%d")
+            by_date: Dict[str, Dict] = {}
+            for table in tables:
+                for rec in table.records:
+                    dev = rec.values.get("device", "")
+                    if not dev: continue
+                    v = float(rec.get_value() or 0.0)
+                    if date_str not in by_date:
+                        by_date[date_str] = {"date": date_str, "devices": {}, "total": 0.0}
+                    by_date[date_str]["devices"][dev] = v
+                    by_date[date_str]["total"] += v
+            return sorted(by_date.values(), key=lambda d: d["date"])
+
+        # Multi-day: push daily-max aggregation into Flux with timezone-aware windows.
+        # aggregateWindow offset shifts boundaries: UTC+N → offset = -Nh so windows
+        # align to local midnight instead of UTC midnight.
+        bucket = INFLUX_BUCKET_MEDIUM if days > 1 else INFLUX_BUCKET
+        offset_s = int(offset.total_seconds())
+        # Flux duration for the window offset: negative of the UTC offset aligns
+        # window starts to local midnight (e.g. UTC+3 → offset: -3h).
+        flux_offset = f"-{abs(offset_s)}s" if offset_s >= 0 else f"{abs(offset_s)}s"
+        q = f"""
+from(bucket: "{bucket}")
+  |> range(start: -{days}d)
+  |> filter(fn: (r) => r._measurement == "solar" and r._field == "yield_today")
+  |> group(columns: ["device"])
+  |> aggregateWindow(every: 1d, fn: max, offset: {flux_offset}, createEmpty: false)
+  |> keep(columns: ["_time", "_value", "device"])
 """
         tables = self.query_api.query(q)
-        daily_max: Dict[Tuple[str, str], float] = {}
+        by_date = {}
         for table in tables:
             for rec in table.records:
                 dev = rec.values.get("device", "")
-                local_t = rec.get_time() + offset
+                if not dev: continue
+                # _time is the window END; subtract 1s to get a timestamp inside
+                # the local calendar day, then apply offset to get local date.
+                local_t = (rec.get_time() - timedelta(seconds=1)) + offset
                 date_str = local_t.strftime("%Y-%m-%d")
                 v = float(rec.get_value() or 0.0)
-                key = (dev, date_str)
-                if key not in daily_max or v > daily_max[key]:
-                    daily_max[key] = v
-
-        by_date: Dict[str, Dict] = {}
-        for (dev, date_str), max_val in daily_max.items():
-            if date_str not in by_date:
-                by_date[date_str] = {"date": date_str, "devices": {}, "total": 0.0}
-            by_date[date_str]["devices"][dev] = max_val
-            by_date[date_str]["total"] += max_val
+                if date_str not in by_date:
+                    by_date[date_str] = {"date": date_str, "devices": {}, "total": 0.0}
+                by_date[date_str]["devices"][dev] = v
+                by_date[date_str]["total"] += v
         return sorted(by_date.values(), key=lambda d: d["date"])
 
     def _stitch(self, range_s: int) -> List[Tuple[str, str, str]]:
