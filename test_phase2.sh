@@ -14,7 +14,7 @@ fail() { echo -e "${RED}[FAIL]${NC} $*"; FAIL=$((FAIL+1)); }
 run() { "$@" 2>/dev/null; }
 
 # Separate project name keeps test containers isolated from the production stack.
-# Production services (mosquitto on ***REDACTED_SERVER_IP***:1883, influxdb) are never touched.
+# Production services (mosquitto on <SERVER_IP>:1883, influxdb) are never touched.
 COMPOSE_TEST=(docker compose --project-name victron-test
     -f docker-compose.yml -f docker-compose.test.yml)
 
@@ -27,7 +27,7 @@ echo -e "\n${BOLD}Phase 2 test — server infrastructure${NC}\n"
 sleep 2
 
 # MQTT_BIND_IP=127.0.0.1 — test mosquitto binds loopback, won't conflict with
-# production mosquitto on ***REDACTED_SERVER_IP***:1883
+# production mosquitto on <SERVER_IP>:1883
 MQTT_BIND_IP=127.0.0.1 "${COMPOSE_TEST[@]}" up -d mosquitto influxdb \
     2>&1 | grep -v "^time=" || true
 

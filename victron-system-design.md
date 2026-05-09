@@ -186,7 +186,7 @@ The response includes a `buckets_used` field listing which buckets contributed d
 
 **Responsibility:** Enforce Google OAuth authentication.
 
-oauth2-proxy sits in front of solar-api. Every request must pass through it. It checks for a valid signed session cookie. If absent, it redirects to Google's OAuth flow. If the authenticated email matches `***REDACTED***@gmail.com`, it sets a session cookie and proxies through. Any other email returns 403.
+oauth2-proxy sits in front of solar-api. Every request must pass through it. It checks for a valid signed session cookie. If absent, it redirects to Google's OAuth flow. If the authenticated email matches an address in `config/allowed_emails`, it sets a session cookie and proxies through. Any other email returns 403.
 
 **X-Forwarded-Port handling:** The dashboard is served on the non-standard external port 8443. Google's OAuth redirect URI must include this port explicitly (e.g. `https://solar.yourdomain.com:8443/oauth2/callback`). Nginx is configured to set `X-Forwarded-Port: 8443` on all proxied requests so that oauth2-proxy constructs the correct redirect URI. Without this, Google rejects the callback with a `redirect_uri_mismatch` error.
 
@@ -531,7 +531,7 @@ Browser -> https://solar.yourdomain.com:8443/
     -> No cookie: redirect to Google OAuth
       -> Redirect URI: https://solar.yourdomain.com:8443/oauth2/callback
       -> oauth2-proxy checks email against allowed list
-        -> ***REDACTED***@gmail.com: set session cookie, proxy through
+        -> <YOUR_EMAIL>: set session cookie, proxy through
         -> Any other: 403
     -> Valid cookie: proxy to solar-api:8080
 ```
@@ -867,7 +867,7 @@ docker run --rm -v $(pwd)/nginx/nginx.conf:/etc/nginx/nginx.conf:ro nginx:alpine
 
 **Integrated acceptance criteria:**
 - `https://solar.yourdomain.com:8443` presents Google login (no TLS warning)
-- `***REDACTED***@gmail.com` reaches the dashboard; any other account gets 403
+- `<YOUR_EMAIL>` reaches the dashboard; any other account gets 403
 - `curl -I https://solar.yourdomain.com:8443` shows `Strict-Transport-Security` and correct headers
 - OAuth redirect URI `https://solar.yourdomain.com:8443/oauth2/callback` works — no `redirect_uri_mismatch` error
 - SSL Labs grade A

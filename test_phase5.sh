@@ -148,7 +148,7 @@ fi
 echo -e "${GREEN}Phase 5 automated checks PASS${NC}"
 echo ""
 echo -e "${BOLD}${CYAN}Containers are running — open your browser now:${NC}"
-echo -e "  ${CYAN}http://***REDACTED_SERVER_IP***:8081${NC}"
+echo -e "  ${CYAN}http://$(hostname -I | awk '{print $1}'):8081${NC}"
 echo ""
 echo -e "${BOLD}Manual UI acceptance checklist:${NC}"
 echo "  [ ] Energy flow lines animate visibly"

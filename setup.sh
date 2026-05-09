@@ -256,7 +256,8 @@ phase6() {
     if grep -q "^DOMAIN=" .env 2>/dev/null \
     && grep -q "^GOOGLE_CLIENT_ID=" .env 2>/dev/null; then
         warn "Phase 6 already configured in .env — skipping interactive setup"
-        warn "Remove DOMAIN / GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / OAUTH2_COOKIE_SECRET from .env to reconfigure."
+        warn "Remove DOMAIN / GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / OAUTH2_COOKIE_SECRET / ALLOWED_EMAIL from .env to reconfigure."
+        _p6_regen_allowed_emails
         ok "Restarting nginx and oauth2-proxy with existing config..."
         docker compose up -d nginx oauth2-proxy
         _p6_print_status
@@ -337,7 +338,18 @@ EOF
     set_env OAUTH2_COOKIE_SECRET "$OAUTH2_COOKIE_SECRET"
     ok "OAuth credentials saved to .env"
 
-    # ── 5. Start nginx + oauth2-proxy ────────────────────────────────────────
+    # ── 5. Allowed email ─────────────────────────────────────────────────────
+    header "Allowed Email"
+    echo "Enter the Google account email address that will have access to the dashboard."
+    echo "Only this address will be permitted; all other accounts will receive 403."
+    echo ""
+    read -rp "Allowed email: " ALLOWED_EMAIL
+    [[ -n "$ALLOWED_EMAIL" ]] || die "Allowed email cannot be empty."
+    set_env ALLOWED_EMAIL "$ALLOWED_EMAIL"
+    _p6_regen_allowed_emails
+    ok "Allowed email written to config/allowed_emails"
+
+    # ── 6. Start nginx + oauth2-proxy ────────────────────────────────────────
     header "Starting Auth + TLS Stack"
     docker compose up -d nginx oauth2-proxy
 
@@ -348,6 +360,15 @@ EOF
     done
 
     _p6_print_status
+}
+
+_p6_regen_allowed_emails() {
+    local email
+    email=$(grep "^ALLOWED_EMAIL=" .env 2>/dev/null | cut -d= -f2)
+    if [[ -n "$email" ]]; then
+        mkdir -p config
+        printf '%s\n' "$email" > config/allowed_emails
+    fi
 }
 
 _p6_certbot_cloudflare() {

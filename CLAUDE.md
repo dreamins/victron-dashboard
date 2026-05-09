@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-Phase 1 (ESP32 firmware + MQTT broker) is **complete and verified** — real Victron BLE payloads flowing to production MQTT at ***REDACTED_SERVER_IP***. Phase 2 (server infrastructure) is **complete and verified** — 4 InfluxDB buckets + 4 downsampling tasks confirmed. Phase 3 (BLE decoder) is **complete and verified**. Phase 4 (API service) is **complete and verified** — 22/22 tests pass; bucket stitching, MAX aggregation for yield fields, timezone-aware daily, bridge/device online logic all confirmed. Phase 5 (Dashboard UI) is **complete and verified** — 7/7 automated checks pass; dashboard served at port 8081 with animated SVG flow, BRIDGE/DEVICE offline distinction, Chart.js tabs, 500-point interval ceiling. — all 3 real devices (mppt_2, mppt_1, battery_sense) decoding and writing to `victron` bucket at ~1/second; 8/8 isolated tests pass including InfluxDB outage resilience. Phase 6 (Auth + TLS) is **complete and verified** — nginx TLS on port 8443, oauth2-proxy Google OAuth, `***REDACTED***@gmail.com` reaches dashboard, other accounts blocked. Key fixes: `SameSite=lax` for OAuth redirect cookies; oauth2-proxy pinned to `v7.6.0` (latest broke upstream env var); `--upstream` passed as CLI arg (pflag ignores env var for `strings`-type flags).
+Phase 1 (ESP32 firmware + MQTT broker) is **complete and verified** — real Victron BLE payloads flowing to production MQTT at `<SERVER_IP>`. Phase 2 (server infrastructure) is **complete and verified** — 4 InfluxDB buckets + 4 downsampling tasks confirmed. Phase 3 (BLE decoder) is **complete and verified**. Phase 4 (API service) is **complete and verified** — 22/22 tests pass; bucket stitching, MAX aggregation for yield fields, timezone-aware daily, bridge/device online logic all confirmed. Phase 5 (Dashboard UI) is **complete and verified** — 7/7 automated checks pass; dashboard served at port 8081 with animated SVG flow, BRIDGE/DEVICE offline distinction, Chart.js tabs, 500-point interval ceiling. — all 3 real devices (mppt_2, mppt_1, battery_sense) decoding and writing to `victron` bucket at ~1/second; 8/8 isolated tests pass including InfluxDB outage resilience. Phase 6 (Auth + TLS) is **complete and verified** — nginx TLS on port 8443, oauth2-proxy Google OAuth, configured allowed email reaches dashboard, other accounts blocked. Key fixes: `SameSite=lax` for OAuth redirect cookies; oauth2-proxy pinned to `v7.6.0` (latest broke upstream env var); `--upstream` passed as CLI arg (pflag ignores env var for `strings`-type flags).
 
 The full system design lives in `victron-system-design.md` (v4.3). That document is the authoritative specification.
 
@@ -28,8 +28,8 @@ cd ~/victron-dashboard
 
 **Hardware notes:**
 - Board: ESP32-S3 (`esp32-s3-devkitc-1`), flashed from Windows via USB
-- ESP32 at ***REDACTED_ESP32_IP*** on local LAN; web UI at `http://***REDACTED_ESP32_IP***/`
-- Production MQTT broker: ***REDACTED_SERVER_IP***:1883 (LAN-only, no anonymous access)
+- ESP32 at `<ESP32_IP>` on local LAN; web UI at `http://<ESP32_IP>/`
+- Production MQTT broker: `<SERVER_IP>`:1883 (LAN-only, no anonymous access)
 
 ## What This Is
 

@@ -3,6 +3,7 @@ esp32/secrets.yaml
 esp32/.esphome/
 esp32/build/
 config/devices.json
+config/allowed_emails
 mosquitto/passwd
 certs/
 .env
