@@ -17,8 +17,8 @@ A self-hosted solar energy dashboard for Victron BLE devices — no cloud, no su
 ### Historical Charts
 ![Power and voltage charts with selectable time ranges](docs/screenshots/charts.png)
 
-### Daily Yield
-![Bar chart of daily solar yield per device](docs/screenshots/daily-yield.png)
+### Battery
+![Battery voltage and temperature over time](docs/screenshots/battery.png)
 
 ---
 
