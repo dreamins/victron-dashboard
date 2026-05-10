@@ -1,0 +1,35 @@
+#!/bin/sh
+# pre-commit hook to ensure all unit and UI tests pass before committing.
+
+# Set dummy environment variables for decoder and UI tests
+export INFLUX_TOKEN="dummy"
+export INFLUX_BUCKET="dummy"
+export PYTHONPATH="."
+
+echo "================================================================================"
+echo "RUNNING PRE-COMMIT TESTS"
+echo "================================================================================"
+
+# 1. Run Decoder Tests
+echo "\n>>> Running Decoder Tests..."
+pytest decoder/tests/ -v
+if [ $? -ne 0 ]; then
+    echo "\n[ERROR] Decoder tests failed. Commit aborted."
+    exit 1
+fi
+
+# 2. Run UI Tests (using local Playwright mocks)
+echo "\n>>> Running UI Tests..."
+pytest api/tests/test_ui.py api/tests/test_ui_visual.py -v
+if [ $? -ne 0 ]; then
+    echo "\n[ERROR] UI tests failed. Commit aborted."
+    exit 1
+fi
+
+# Note: Integration tests in test_api.py are excluded from pre-commit 
+# as they require a running Docker environment and InfluxDB.
+
+echo "\n================================================================================"
+echo "ALL TESTS PASSED. Proceeding with commit."
+echo "================================================================================"
+exit 0
