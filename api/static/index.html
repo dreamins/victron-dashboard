@@ -80,7 +80,7 @@ header {
   background:var(--hdr-bg); backdrop-filter:blur(12px);
   border-bottom:1px solid var(--border); z-index:50;
 }
-.logo { display:flex; align-items:center; gap:12px; font-size:18px; font-weight:800; letter-spacing:-0.5px; }
+.logo { display:flex; align-items:center; gap:12px; font-size:18px; font-weight:800; letter-spacing:-0.5px; white-space:nowrap; }
 .logo-icon {
   width:36px; height:36px; border-radius:10px;
   background:linear-gradient(135deg,#ffcc33,#f97316);
@@ -129,7 +129,7 @@ body:not(.light) #flow svg { filter:drop-shadow(0 0 30px rgba(0,0,0,0.3)); }
 .nv { fill:var(--node-val); font-size:14px; font-weight:700; }
 .nbig { font-size:20px; font-weight:800; }
 @keyframes dash { to { stroke-dashoffset:-20; } }
-.fl { fill:none; stroke:#64748b; stroke-width:3.5; stroke-linecap:butt; opacity: 1.0; }
+.fl { fill:none; stroke:#64748b; stroke-width:4; stroke-linecap:butt; opacity: 1.0; }
 .fl-active { stroke-dasharray:7 13; }
 
 /* ── Cards ───────────────────────────────────────────────────────────── */
@@ -232,17 +232,19 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 
 <header>
   <div class="logo">
-    <div class="logo-icon">☀</div>
-    <span>Solar Monitor</span>
+    <div class="logo-icon">Sun</div>
+    <span>Solar Monitor v2.2</span>
   </div>
   <div class="hdr-right">
     <div id="status-pills"></div>
-    <span id="last-update">—</span>
-    <button id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark">🌙</button>
+    <span id="last-update">-</span>
+    <button id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="overflow:visible"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+    </button>
   </div>
 </header>
 
-<div id="bridge-banner" class="hidden">Bridge Offline — check ESP32 connection</div>
+<div id="bridge-banner" class="hidden">Bridge Offline - check ESP32 connection</div>
 
 <div id="wrap">
   <div id="left">
@@ -271,7 +273,7 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
           <clipPath id="batt-clip"><rect x="154" y="254" width="192" height="74" rx="7"/></clipPath>
         </defs>
 
-        <!-- PV Panel 1 — solar cell tile + label + value -->
+        <!-- PV Panel 1 - solar cell tile + label + value -->
         <rect id="pv1-box" class="nb" x="20" y="12" width="160" height="68" rx="12"/>
         <rect x="24" y="16" width="152" height="60" rx="9" fill="url(#solar-cell)" opacity="0.9"/>
         <!-- aluminium frame lines -->
@@ -279,9 +281,9 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <line x1="24" y1="55" x2="176" y2="55" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <line x1="76" y1="16" x2="76" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <line x1="124" y1="16" x2="124" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <text id="pv1-label" class="nl" x="100" y="29" text-anchor="middle" style="font-size:9px">—</text>
-        <text class="nv" id="flow-pv1-volt" x="100" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">—</text>
-        <text class="nv" id="flow-pv1-val" x="100" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">—</text>
+        <text id="pv1-label" class="nl" x="100" y="29" text-anchor="middle" style="font-size:9px">-</text>
+        <text class="nv" id="flow-pv1-volt" x="100" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">-</text>
+        <text class="nv" id="flow-pv1-val" x="100" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">-</text>
 
         <!-- PV Panel 2 -->
         <rect id="pv2-box" class="nb" x="320" y="12" width="160" height="68" rx="12"/>
@@ -290,73 +292,76 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <line x1="324" y1="55" x2="476" y2="55" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <line x1="376" y1="16" x2="376" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <line x1="424" y1="16" x2="424" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <text id="pv2-label" class="nl" x="400" y="29" text-anchor="middle" style="font-size:9px">—</text>
-        <text class="nv" id="flow-pv2-volt" x="400" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">—</text>
-        <text class="nv" id="flow-pv2-val" x="400" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">—</text>
+        <text id="pv2-label" class="nl" x="400" y="29" text-anchor="middle" style="font-size:9px">-</text>
+        <text class="nv" id="flow-pv2-volt" x="400" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">-</text>
+        <text class="nv" id="flow-pv2-val" x="400" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">-</text>
 
-        <!-- MPPT Nodes — labels updated from JS, clickable -->
+        <!-- MPPT Nodes - labels updated from JS, clickable -->
         <rect id="mppt1-box" class="nb" x="20" y="112" width="160" height="86" rx="20" style="cursor:pointer" onclick="switchTab(0)"/>
-        <text id="mppt1-label" class="nl" x="100" y="134" text-anchor="middle" style="cursor:pointer" onclick="switchTab(0)">—</text>
+        <text id="mppt1-label" class="nl" x="100" y="134" text-anchor="middle" style="cursor:pointer" onclick="switchTab(0)">-</text>
         <rect id="mppt1-status-bg" x="58" y="140" width="84" height="18" rx="9" fill="#1f2937"/>
-        <text id="mppt1-status-txt" class="nl" x="100" y="153" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(0)">—</text>
-        <text class="nv nbig" id="mppt1-flow-val" x="100" y="184" text-anchor="middle" style="cursor:pointer" onclick="switchTab(0)">—</text>
+        <text id="mppt1-status-txt" class="nl" x="100" y="153" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(0)">-</text>
+        <text class="nv nbig" id="mppt1-flow-val" x="100" y="184" text-anchor="middle" style="cursor:pointer" onclick="switchTab(0)">-</text>
 
         <rect id="mppt2-box" class="nb" x="320" y="112" width="160" height="86" rx="20" style="cursor:pointer" onclick="switchTab(1)"/>
-        <text id="mppt2-label" class="nl" x="400" y="134" text-anchor="middle" style="cursor:pointer" onclick="switchTab(1)">—</text>
+        <text id="mppt2-label" class="nl" x="400" y="134" text-anchor="middle" style="cursor:pointer" onclick="switchTab(1)">-</text>
         <rect id="mppt2-status-bg" x="358" y="140" width="84" height="18" rx="9" fill="#1f2937"/>
-        <text id="mppt2-status-txt" class="nl" x="400" y="153" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(1)">—</text>
-        <text class="nv nbig" id="mppt2-flow-val" x="400" y="184" text-anchor="middle" style="cursor:pointer" onclick="switchTab(1)">—</text>
+        <text id="mppt2-status-txt" class="nl" x="400" y="153" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(1)">-</text>
+        <text class="nv nbig" id="mppt2-flow-val" x="400" y="184" text-anchor="middle" style="cursor:pointer" onclick="switchTab(1)">-</text>
 
-        <!-- Battery: LiFePO4 rectangular pack (LiTime style) — whole group is clickable -->
+        <!-- Battery: LiFePO4 rectangular pack (LiTime style) - whole group is clickable -->
         <g onclick="switchTab(2)" style="cursor:pointer">
           <!-- Main body -->
           <rect class="nb" x="150" y="248" width="200" height="84" rx="10"/>
-          <!-- Cell dividers — 4S pack visual -->
+          <!-- Cell dividers - 4S pack visual -->
           <line x1="200" y1="252" x2="200" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
           <line x1="250" y1="252" x2="250" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
           <line x1="300" y1="252" x2="300" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
           <!-- Negative terminal (-) bolt on top-left -->
           <rect x="162" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
-          <text x="172" y="248" text-anchor="middle" style="fill:var(--sub);font-size:10px;font-weight:900">−</text>
+          <text x="172" y="248" text-anchor="middle" style="fill:var(--sub);font-size:10px;font-weight:900">&minus;</text>
           <!-- Positive terminal (+) bolt on top-right -->
           <rect x="318" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
           <text x="328" y="248" text-anchor="middle" style="fill:#ef4444;font-size:10px;font-weight:900">+</text>
           <!-- Charge fill bar -->
           <rect id="batt-fill-bar" x="154" y="252" width="0" height="76" fill="url(#g-batt-hi)" opacity="0.45" clip-path="url(#batt-clip)"/>
           <!-- Labels -->
-          <text class="nl" x="250" y="266" text-anchor="middle" style="font-size:9px;letter-spacing:0.5px">LiFePO₄ · Battery</text>
-          <text class="nv" id="flow-batt-v" x="208" y="300" text-anchor="middle" style="font-size:19px;font-weight:800;fill:var(--batt)">—</text>
-          <text id="flow-batt-soc" style="fill:var(--sub);font-size:12px;font-weight:700" x="308" y="290" text-anchor="middle">—</text>
-          <text class="nv" id="flow-batt-t" x="308" y="308" text-anchor="middle" style="font-size:12px;fill:#9ca3af">—</text>
+          <text class="nl" x="250" y="266" text-anchor="middle" style="font-size:9px;letter-spacing:0.5px">LiFePO4 &middot; Battery</text>
+          <text class="nv" id="flow-batt-v" x="208" y="300" text-anchor="middle" style="font-size:19px;font-weight:800;fill:var(--batt)">-</text>
+          <text id="flow-batt-soc" style="fill:var(--sub);font-size:12px;font-weight:700" x="308" y="290" text-anchor="middle">-</text>
+          <text class="nv" id="flow-batt-t" x="308" y="308" text-anchor="middle" style="font-size:12px;fill:#9ca3af">-</text>
         </g>
 
-        <!-- Load nodes — hidden until JS shows them -->
+        <!-- Load nodes - hidden until JS shows them -->
         <g id="mppt1-load-grp" style="display:none">
           <circle class="nb" cx="42" cy="286" r="24"/>
-          <text id="mppt1-load-val" class="nv" x="42" y="291" text-anchor="middle" style="font-size:11px">—</text>
+          <text id="mppt1-load-val" class="nv" x="42" y="291" text-anchor="middle" style="font-size:11px">-</text>
           <text class="nl" x="42" y="318" text-anchor="middle">Load</text>
         </g>
         <g id="mppt2-load-grp" style="display:none">
           <circle class="nb" cx="458" cy="286" r="24"/>
-          <text id="mppt2-load-val" class="nv" x="458" y="291" text-anchor="middle" style="font-size:11px">—</text>
+          <text id="mppt2-load-val" class="nv" x="458" y="291" text-anchor="middle" style="font-size:11px">-</text>
           <text class="nl" x="458" y="318" text-anchor="middle">Load</text>
         </g>
 
-        <!-- Flow paths -->
-        <path id="path-pv1"         class="fl" d="M100,80  L100.01,112"/>
-        <path id="path-pv2"         class="fl" d="M400,80  L400.01,112"/>
-        <path id="path-mppt1"       class="fl" d="M100,198 C100,232 172,232 172,238"/>
-        <path id="path-mppt2"       class="fl" d="M400,198 C400,232 328,232 328,238"/>
+        <!-- Flow paths (2px gap to avoid box overlap) -->
+        <path id="path-pv1"         class="fl" d="M100,82  L100.01,110"/>
+        <path id="path-pv2"         class="fl" d="M400,82  L400.01,110"/>
+        <path id="path-mppt1"       class="fl" d="M100,200 C100,230 172,230 172,238"/>
+        <path id="path-mppt2"       class="fl" d="M400,200 C400,230 328,230 328,238"/>
         <!-- load paths end at circle edge (r=24), not centre, so they don't overlap the label -->
-        <path id="path-mppt1-load"  class="fl" d="M100,198 L55,266"   style="display:none"/>
-        <path id="path-mppt2-load"  class="fl" d="M400,198 L445,266"  style="display:none"/>
+        <path id="path-mppt1-load"  class="fl" d="M100,200 L55,266"   style="display:none"/>
+        <path id="path-mppt2-load"  class="fl" d="M400,200 L445,266"  style="display:none"/>
       </svg>
     </div>
     <div id="cards"></div>
   </div>
 
   <div id="right">
-    <button id="back-btn" onclick="closeMobileDetail()">← Back to overview</button>
+    <button id="back-btn" onclick="closeMobileDetail()">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+      Back to overview
+    </button>
     <div class="tab-bar" id="tab-bar">
       <!-- tab buttons injected by JS so names come from real device data -->
     </div>
@@ -407,16 +412,16 @@ var CH={};
 
 function fv(d,f,u='',dp=1){
   const v=d?.fields?.[f];
-  if(v==null||isNaN(v)) return '—';
+  if(v==null||isNaN(v)) return '-';
   return v.toFixed(dp)+(u?' '+u:'');
 }
 function fmtW(v){
-  if(v==null||isNaN(v)) return '—';
+  if(v==null||isNaN(v)) return '-';
   if(Math.abs(v)>=1000) return (v/1000).toFixed(2)+' kW';
   return v.toFixed(0)+' W';
 }
 function fmtWh(v){
-  if(v==null||isNaN(v)) return '—';
+  if(v==null||isNaN(v)) return '-';
   if(Math.abs(v)>=1000) return (v/1000).toFixed(2)+' kWh';
   return v.toFixed(0)+' Wh';
 }
@@ -424,7 +429,7 @@ function wTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(1)+' kW':v+' W'; }
 function whTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(2)+' kWh':v+' Wh'; }
 function setText(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
 
-// ── LiFePO4 4S SOC estimate (resting voltage only — hide while charging) ────
+// ── LiFePO4 4S SOC estimate (resting voltage only - hide while charging) ────
 const LFP_CURVE=[
   [13.60,100],[13.40,99],[13.30,90],[13.20,80],[13.10,70],
   [13.00,60],[12.90,50],[12.80,40],[12.70,30],[12.60,20],
@@ -474,7 +479,14 @@ async function poll(){
     
     // Only update state if we got actual data (sticky state)
     if(devs.devices && devs.devices.length > 0){
-      S.current=cur;
+      // Deep merge current data to ensure fields don't disappear if a packet is missing them
+      for(const id in cur){
+        if(!S.current[id]) S.current[id] = cur[id];
+        else {
+          S.current[id].ts = cur[id].ts;
+          S.current[id].fields = { ...S.current[id].fields, ...cur[id].fields };
+        }
+      }
       S.devices=devs.devices;
       S.bridge_online=devs.bridge_online;
       
@@ -501,7 +513,7 @@ function buildTabDefs(){
   let mptts = S.mptts;
   let bsense = S.bsense;
   if(mptts.length===0 && S.devices.length>0){
-    // Bridge offline — derive structure from device list instead
+    // Bridge offline - derive structure from device list instead
     mptts = S.devices.filter(d=>'charge_state' in (S.current[d.id]?.fields||{}) ||
       !S.devices.some(x=>x.id===d.id && 'temperature' in (S.current[x.id]?.fields||{})))
       .map(d=>d.id);
@@ -551,7 +563,7 @@ function buildTabDefs(){
         </div>`;
       if(d.kind==='battery') return `
         <div id="panel-${i}" class="chart-panel ${active}">
-          <div class="chart-card"><div class="chart-title">Battery Voltage — All Sources</div><div class="chart-container"><canvas id="chart-${i}-v"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">Battery Voltage - All Sources</div><div class="chart-container"><canvas id="chart-${i}-v"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Temperature</div><div class="chart-container"><canvas id="chart-${i}-t"></canvas></div></div>
         </div>`;
       // insights
@@ -586,8 +598,8 @@ function renderFlow(){
   const bs=S.bsense?S.current[S.bsense]:null;
 
   // Update node labels from real device data
-  const lbl1=m1?.label||S.current[S.mptts[0]]?.label||'—';
-  const lbl2=m2?.label||S.current[S.mptts[1]]?.label||'—';
+  const lbl1=m1?.label||S.current[S.mptts[0]]?.label||'-';
+  const lbl2=m2?.label||S.current[S.mptts[1]]?.label||'-';
   setText('pv1-label',  lbl1);
   setText('pv2-label',  lbl2);
   setText('mppt1-label',lbl1);
@@ -622,12 +634,12 @@ function renderFlow(){
       bar.setAttribute('fill', S.bsoc<20?'url(#g-batt-lo)':'url(#g-batt-hi)');
     }
   } else {
-    setText('flow-batt-v','—');
-    setText('flow-batt-soc','—');
+    setText('flow-batt-v','-');
+    setText('flow-batt-soc','-');
   }
 
   const temp=bs?.fields?.temperature??null;
-  setText('flow-batt-t', temp!=null?temp.toFixed(1)+'°C':'');
+  setText('flow-batt-t', temp!=null?temp.toFixed(1)+'\u00B0C':'');
 
   setLoadNode(1,m1); setLoadNode(2,m2);
 
@@ -635,10 +647,10 @@ function renderFlow(){
   const c1=Math.round(m1?.fields?.charge_state??0), c2=Math.round(m2?.fields?.charge_state??0);
   const col1=STATES[c1]?.[1]||'#64748b', col2=STATES[c2]?.[1]||'#64748b';
 
-  updatePath('path-pv1',   pv1??0,                          '#f59e0b', 40);   // Amber for solar
+  updatePath('path-pv1',   pv1??0,                          '#f59e0b', 40);
   updatePath('path-pv2',   pv2??0,                          '#f59e0b', 40);
-  updatePath('path-mppt1', m1?.fields?.charge_current??0,   col1,       4);   // Match status color
-  updatePath('path-mppt2', m2?.fields?.charge_current??0,   col2,       4);
+  updatePath('path-mppt1', m1?.fields?.charge_current??0,   col1,        4);
+  updatePath('path-mppt2', m2?.fields?.charge_current??0,   col2,        4);
 }
 
 function pvWatts(m){
@@ -651,9 +663,9 @@ function pvWatts(m){
 
 function setPvNode(idx,m){
   const w=pvWatts(m);
-  setText(`flow-pv${idx}-val`, w!=null ? fmtW(w) : '—');
+  setText(`flow-pv${idx}-val`, w!=null ? fmtW(w) : '-');
   const volt=m?.fields?.pv_voltage;
-  setText(`flow-pv${idx}-volt`, volt!=null ? volt.toFixed(1)+' V' : '—');
+  setText(`flow-pv${idx}-volt`, volt!=null ? volt.toFixed(1)+' V' : '-');
   const box=document.getElementById(`pv${idx}-box`);
   if(box){
     box.style.stroke = (w!=null&&w>1) ? '#d97706' : '';
@@ -680,14 +692,14 @@ function setLoadNode(idx,m){
   const valEl=document.getElementById(`mppt${idx}-load-val`);
 
   if(lp>=1){
-    // Measurable draw — full colour, animated flow
+    // Measurable draw - full colour, animated flow
     if(circle) circle.style.opacity='';
     if(valEl)  valEl.style.fill='';
     setText(`mppt${idx}-load-val`, lp.toFixed(0)+' W');
     if(pth) pth.style.display='';
     updatePath(`path-mppt${idx}-load`,lp,'#dc2626',100); // Darker Red for load
   }else{
-    // Field present but below measurement floor — dim node, static (no animation) line
+    // Field present but below measurement floor - dim node, static (no animation) line
     if(circle) circle.style.opacity='0.4';
     if(valEl)  valEl.style.fill='var(--sub)';
     setText(`mppt${idx}-load-val`,'~0 W');
@@ -741,7 +753,7 @@ function updatePath(id,val,col,maxVal){
       p.style.stroke=col;
       p.style.filter='url(#glow)';
       p.style.animation=anim;
-      p.style.strokeWidth='5.5'; // Increased for visibility
+      p.style.strokeWidth='6'; // Extra thick
     }
   }else if(p.classList.contains('fl-active')){
     p.classList.remove('fl-active');
@@ -775,14 +787,14 @@ function renderCards(){
     // ── MPPT card ──
     if(isM){
       const pvW=pvWatts(d);
-      const hNum = pvW!=null ? fmtW(pvW) : '—';
+      const hNum = pvW!=null ? fmtW(pvW) : '-';
       const hUnit= '';  // fmtW already includes unit
       const hLbl = pvW==null && (d?.fields?.charge_state??0)!==0
-                 ? 'Solar — not in current packet'
+                 ? 'Solar - not in current packet'
                  : 'Solar Power';
       const bv   = fv(d,'battery_voltage',' V',2);
-      const cc   = d?.fields?.charge_current!=null ? d.fields.charge_current.toFixed(2)+' A' : '—';
-      const pvv  = d?.fields?.pv_voltage!=null ? d.fields.pv_voltage.toFixed(1)+' V' : '—';
+      const cc   = d?.fields?.charge_current!=null ? d.fields.charge_current.toFixed(2)+' A' : '-';
+      const pvv  = d?.fields?.pv_voltage!=null ? d.fields.pv_voltage.toFixed(1)+' V' : '-';
       const yt   = fmtWh(d?.fields?.yield_today??null);
       const cs   = Math.round(d?.fields?.charge_state??0);
       const stLbl= (STATES[cs]||STATES[0])[0];
@@ -805,11 +817,11 @@ function renderCards(){
 
     // ── Battery Sense card ──
     // Use shared S.bvolt / S.bsoc (same fallback chain as the flow diagram)
-    const bvDisp  = S.bvolt!=null ? S.bvolt.toFixed(2) : '—';
-    const socDisp = S.bsoc!=null  ? S.bsoc.toFixed(0)+'%' : '—';
-    const tmpDisp = fv(d,'temperature','°C');
+    const bvDisp  = S.bvolt!=null ? S.bvolt.toFixed(2) : '-';
+    const socDisp = S.bsoc!=null  ? S.bsoc.toFixed(0)+'%' : '-';
+    const tmpDisp = fv(d,'temperature','\u00B0C');
     const battSrc = d?.fields?.battery_voltage!=null ? d.label
-                  : S.mptts.length>0 ? (S.current[S.mptts[0]]?.label||'MPPT') : '—';
+                  : S.mptts.length>0 ? (S.current[S.mptts[0]]?.label||'MPPT') : '-';
     return `<div class="card${!info?.online?' s-silent':''}${isActive?' active-tab':''}${S.mptts.length%2===0?' card-wide':''}"
                  onclick="switchTab(${tabIdx})" style="padding-top:22px">
       <div class="card-accent" style="background:${accent}"></div>
@@ -822,7 +834,7 @@ function renderCards(){
       <div class="c-grid">
         <div><div class="m-v">${tmpDisp}</div><div class="m-l">Temp</div></div>
         <div><div class="m-v">${socDisp}</div><div class="m-l">SOC</div></div>
-        <div><div class="m-v">—</div><div class="m-l">—</div></div>
+        <div><div class="m-v">-</div><div class="m-l">-</div></div>
       </div>
     </div>`;
   }).join('');
@@ -868,7 +880,7 @@ async function updateCharts(){
   }else if(def.kind==='battery'){
     const voltIds=[...(S.bsense?[S.bsense]:[]),...S.mptts];
     await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,iv,' V');
-    if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,iv,'#f97316','°C');
+    if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,iv,'#f97316','\u00B0C');
   }else{
     await drawMulti(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,iv,wTick);
     await drawDailyBar(`chart-${S.tab}-bar`);
@@ -936,7 +948,7 @@ async function drawMulti(cid,ids,field,start,iv,unit){
 // Range → days for the daily yield bar chart
 const RANGE_DAYS={'1h':1,'6h':1,'24h':1,'7d':7,'30d':30,'All':365};
 
-// Cache responses per day-count for 5 minutes — aggregation query is expensive
+// Cache responses per day-count for 5 minutes - aggregation query is expensive
 let _dailyCache={};
 
 async function drawDailyBar(cid){
