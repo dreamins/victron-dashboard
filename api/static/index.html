@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Solar Monitor</title>
+<title>Solar Monitor v2.2</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -129,8 +129,8 @@ body:not(.light) #flow svg { filter:drop-shadow(0 0 30px rgba(0,0,0,0.3)); }
 .nv { fill:var(--node-val); font-size:14px; font-weight:700; }
 .nbig { font-size:20px; font-weight:800; }
 @keyframes dash { to { stroke-dashoffset:-20; } }
-.fl { fill:none; stroke:var(--dim); stroke-width:3.5; stroke-linecap:round; opacity: 0.6; }
-.fl-active { stroke-dasharray:7 13; opacity: 1; }
+.fl { fill:none; stroke:#64748b; stroke-width:3.5; stroke-linecap:round; opacity: 1.0; }
+.fl-active { stroke-dasharray:7 13; }
 
 /* ── Cards ───────────────────────────────────────────────────────────── */
 #cards {
@@ -340,8 +340,8 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         </g>
 
         <!-- Flow paths -->
-        <path id="path-pv1"         class="fl" d="M100,80  L100.1,112"/>
-        <path id="path-pv2"         class="fl" d="M400,80  L400.1,112"/>
+        <path id="path-pv1"         class="fl" d="M100,80  L100,112"/>
+        <path id="path-pv2"         class="fl" d="M400,80  L400,112"/>
         <path id="path-mppt1"       class="fl" d="M100,198 C100,232 172,232 172,238"/>
         <path id="path-mppt2"       class="fl" d="M400,198 C400,232 328,232 328,238"/>
         <!-- load paths end at circle edge (r=24), not centre, so they don't overlap the label -->
@@ -450,11 +450,13 @@ function chartColors(){
 
 function setTheme(mode){
   document.body.classList.toggle('light', mode==='light');
-  document.getElementById('theme-btn').textContent = mode==='light'?'🌙':'☀';
+  document.getElementById('theme-btn').innerHTML = mode==='light'
+    ? '<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>'
+    : '<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
   // Recreate charts with new palette
   Object.values(CH).forEach(c=>c?.destroy());
   CH={};
-  updateCharts();
+  if(S.chartsLoaded) updateCharts();
 }
 function toggleTheme(){ setTheme(isLight()?'dark':'light'); }
 
@@ -466,21 +468,23 @@ async function poll(){
       fetch('/api/v1/current').then(r=>r.json()),
       fetch('/api/v1/devices').then(r=>r.json())
     ]);
-    S.current=cur;
-    S.devices=devs.devices||[];
-    S.bridge_online=devs.bridge_online;
     
-    // Identify MPPTs from the static device list (resilient to missing data in current cycle)
-    // We assume any device that isn't a Battery Sense (Sense-12) is an MPPT.
-    const bsDevice = S.devices.find(d => d.id.includes('sense') || d.label.toLowerCase().includes('sense'));
-    S.bsense = bsDevice ? bsDevice.id : null;
-    S.mptts = S.devices.filter(d => d.id !== S.bsense).map(d => d.id).sort();
+    // Only update state if we got actual data (sticky state)
+    if(devs.devices && devs.devices.length > 0){
+      S.current=cur;
+      S.devices=devs.devices;
+      S.bridge_online=devs.bridge_online;
+      
+      const bsDevice = S.devices.find(d => d.id.includes('sense') || d.label.toLowerCase().includes('sense'));
+      S.bsense = bsDevice ? bsDevice.id : null;
+      S.mptts = S.devices.filter(d => d.id !== S.bsense).map(d => d.id).sort();
+    }
 
     S.last=Date.now();
     buildTabDefs();
     render();
     if(!S.chartsLoaded && S.tabDefs.length>0){ S.chartsLoaded=true; updateCharts(); }
-  }catch(e){ console.error(e); }
+  }catch(e){ console.error("Poll failed:", e); }
 }
 
 // ── Tab definitions (built from real device data) ─────────────────────────
@@ -722,17 +726,16 @@ function updatePath(id,val,col,maxVal){
   // Ensure the base path is always visible
   p.style.display=''; 
   
-  if(val>0.05){
+  if(val>0.01){ // Trigger animation at even lower power (1W or 0.01A)
     const ratio=Math.min(val/maxVal,1);
-    const dur=(Math.max(0.3, 2.0-ratio*1.7)).toFixed(2);
+    const dur=(Math.max(0.3, 1.8-ratio*1.5)).toFixed(2);
     const anim=`dash ${dur}s linear infinite`;
-    // Guard: only touch style when values actually change to avoid animation restarts
     if(!p.classList.contains('fl-active') || p.style.stroke!==col || p.style.animation!==anim){
       p.classList.add('fl-active');
       p.style.stroke=col;
       p.style.filter='url(#glow)';
       p.style.animation=anim;
-      p.style.strokeWidth='6'; // Extra thick when active
+      p.style.strokeWidth='4.5';
     }
   }else if(p.classList.contains('fl-active')){
     p.classList.remove('fl-active');
