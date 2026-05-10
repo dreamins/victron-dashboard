@@ -565,13 +565,13 @@ function buildTabDefs(){
         <div id="panel-${i}" class="chart-panel ${active}">
           <div class="chart-card"><div class="chart-title">Battery Voltage - All Sources</div><div class="chart-container"><canvas id="chart-${i}-v"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Temperature</div><div class="chart-container"><canvas id="chart-${i}-t"></canvas></div></div>
-          <div class="chart-card"><div class="chart-title">Combined Charging Current (A)</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
-          <div class="chart-card"><div class="chart-title">Combined Charging Power (W)</div><div class="chart-container"><canvas id="chart-${i}-p"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">Total Charging Current</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">Total Charging Power</div><div class="chart-container"><canvas id="chart-${i}-p"></canvas></div></div>
         </div>`;
       // insights
       return `
         <div id="panel-${i}" class="chart-panel ${active}">
-          <div class="chart-card"><div class="chart-title">Combined Solar Output</div><div class="chart-container"><canvas id="chart-${i}-comb"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">Total Solar Output</div><div class="chart-container"><canvas id="chart-${i}-comb"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Daily Yield (Wh)</div><div class="chart-container"><canvas id="chart-${i}-bar"></canvas></div></div>
         </div>`;
     }).join('');
@@ -883,10 +883,10 @@ async function updateCharts(){
     const voltIds=[...(S.bsense?[S.bsense]:[]),...S.mptts];
     await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,iv,' V');
     if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,iv,'#f97316','\u00B0C');
-    await drawMulti(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,iv,' A');
-    await drawMulti(`chart-${S.tab}-p`,S.mptts,'pv_power',       rng.st,iv,wTick);
+    await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,iv,' A',     'Total Charging Current','#10b981');
+    await drawSum(`chart-${S.tab}-p`,S.mptts,'pv_power',       rng.st,iv,wTick,   'Total Charging Power',  '#f59e0b');
   }else{
-    await drawMulti(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,iv,wTick);
+    await drawSum(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,iv,wTick, 'Total Solar Output','#f59e0b');
     await drawDailyBar(`chart-${S.tab}-bar`);
   }
 }
@@ -931,7 +931,7 @@ async function drawLine(cid,dev,field,start,iv,col,unit){
 async function drawMulti(cid,ids,field,start,iv,unit){
   const canvas=document.getElementById(cid); if(!canvas)return;
   const ctx=canvas.getContext('2d');
-  const COLS=['#00f2ff','#ffcc33','#10b981'];
+  const COLS=['#00f2ff','#ffcc33','#10b981','#a78bfa'];
   const datasets=await Promise.all(ids.map(async(id,i)=>{
     const res=await hFetch(id,field,start,iv);
     const col=COLS[i%COLS.length];
@@ -946,6 +946,29 @@ async function drawMulti(cid,ids,field,start,iv,unit){
     type:'line', data:{datasets},
     options:{...baseOpts(unit),
       plugins:{legend:{display:true,labels:{color:c.leg,font:{size:11},boxWidth:12}}}}
+  });
+}
+
+async function drawSum(cid,ids,field,start,iv,unit,label,col){
+  const canvas=document.getElementById(cid); if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  const results=await Promise.all(ids.map(id=>hFetch(id,field,start,iv)));
+  
+  const sumMap={};
+  results.forEach(res=>{
+    (res.points||[]).forEach(p=>{
+      sumMap[p.t] = (sumMap[p.t]||0) + p.v;
+    });
+  });
+  
+  const sortedTs = Object.keys(sumMap).sort();
+  const data = sortedTs.map(t=>({x:t, y:sumMap[t]}));
+
+  if(CH[cid])CH[cid].destroy();
+  CH[cid]=new Chart(canvas,{
+    type:'line',
+    data:{datasets:[{label, data, borderColor:col, backgroundColor:grad(ctx,col), fill:true, borderWidth:2, pointRadius:0, tension:0.3}]},
+    options:baseOpts(unit)
   });
 }
 

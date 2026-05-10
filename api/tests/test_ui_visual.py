@@ -124,8 +124,8 @@ def test_ui_visual_verification(page: Page, static_server: str):
     titles = active_panel.locator(".chart-title").all_text_contents()
     assert "Battery Voltage - All Sources" in titles
     assert "Temperature" in titles
-    assert "Combined Charging Current (A)" in titles
-    assert "Combined Charging Power (W)" in titles
+    assert "Total Charging Current" in titles
+    assert "Total Charging Power" in titles
     
     # Check if 4 canvases are present
     assert active_panel.locator("canvas").count() == 4
