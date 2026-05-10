@@ -95,12 +95,12 @@ header {
 .s-dot.off { background:var(--dim); }
 #last-update { color:var(--sub); font-size:12px; font-variant-numeric:tabular-nums; }
 #theme-btn {
-  background:var(--surf-1); border:1px solid var(--border); color:var(--text);
+  background:var(--surf-2); border:1px solid var(--border); color:var(--text);
   width:36px; height:36px; border-radius:10px; cursor:pointer;
   font-size:18px; display:flex; align-items:center; justify-content:center;
   transition:all 0.2s;
 }
-#theme-btn:hover { background:var(--surf-2); }
+#theme-btn:hover { background:var(--surf-1); }
 
 /* ── Banner ──────────────────────────────────────────────────────────── */
 #bridge-banner {
@@ -120,7 +120,8 @@ header {
   padding:14px 20px; flex-shrink:0;
   background: var(--flow-grad);
 }
-#flow svg { width:100%; filter:drop-shadow(0 0 30px rgba(0,0,0,0.3)); }
+#flow svg { width:100%; filter:drop-shadow(0 0 30px rgba(0,0,0,0.15)); }
+body:not(.light) #flow svg { filter:drop-shadow(0 0 30px rgba(0,0,0,0.3)); }
 
 /* ── SVG node styles (CSS vars so light/dark work) ─────────────────── */
 .nb { fill:var(--node-fill); stroke:var(--node-stroke); stroke-width:1.5; }
@@ -128,8 +129,8 @@ header {
 .nv { fill:var(--node-val); font-size:14px; font-weight:700; }
 .nbig { font-size:20px; font-weight:800; }
 @keyframes dash { to { stroke-dashoffset:-20; } }
-.fl { fill:none; stroke:var(--dim); stroke-width:3.5; stroke-linecap:round; }
-.fl-active { stroke-dasharray:7 13; }
+.fl { fill:none; stroke:var(--dim); stroke-width:3.5; stroke-linecap:round; opacity: 0.6; }
+.fl-active { stroke-dasharray:7 13; opacity: 1; }
 
 /* ── Cards ───────────────────────────────────────────────────────────── */
 #cards {
@@ -339,8 +340,8 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         </g>
 
         <!-- Flow paths -->
-        <path id="path-pv1"         class="fl" d="M100,80  L100,112"/>
-        <path id="path-pv2"         class="fl" d="M400,80  L400,112"/>
+        <path id="path-pv1"         class="fl" d="M100,80  L100.1,112"/>
+        <path id="path-pv2"         class="fl" d="M400,80  L400.1,112"/>
         <path id="path-mppt1"       class="fl" d="M100,198 C100,232 172,232 172,238"/>
         <path id="path-mppt2"       class="fl" d="M400,198 C400,232 328,232 328,238"/>
         <!-- load paths end at circle edge (r=24), not centre, so they don't overlap the label -->
@@ -387,7 +388,9 @@ const STATES={
   252:['Ext. control',   '#6366f1'],
 };
 
-let S={
+// ── State ──────────────────────────────────────────────────────────────────
+
+var S={
   current:{}, devices:[], bridge_online:true,
   mptts:[], bsense:null,
   bvolt:null, bsoc:null,   // computed in renderFlow, shared with renderCards
@@ -395,7 +398,7 @@ let S={
   range:'24h', last:null, chartsLoaded:false,
   tabDefs:[]               // [{id, label, field:'pv_power'|'battery_voltage', panel}]
 };
-let CH={};
+var CH={};
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
@@ -420,9 +423,9 @@ function setText(id,v){const e=document.getElementById(id);if(e)e.textContent=v;
 
 // ── LiFePO4 4S SOC estimate (resting voltage only — hide while charging) ────
 const LFP_CURVE=[
-  [13.60,100],[13.50,99],[13.40,95],[13.33,90],[13.30,80],
-  [13.28,70],[13.25,60],[13.22,50],[13.20,40],[13.16,30],
-  [13.10,20],[12.80,10],[12.00,0],
+  [13.60,100],[13.40,99],[13.30,90],[13.20,80],[13.10,70],
+  [13.00,60],[12.90,50],[12.80,40],[12.70,30],[12.60,20],
+  [12.00,10],[10.00,0]
 ];
 function lfp4Soc(v){
   if(v>=LFP_CURVE[0][0]) return 100;
@@ -466,8 +469,13 @@ async function poll(){
     S.current=cur;
     S.devices=devs.devices||[];
     S.bridge_online=devs.bridge_online;
-    S.mptts=Object.keys(cur).filter(k=>'charge_state' in (cur[k].fields||{})).sort();
-    S.bsense=Object.keys(cur).find(k=>'temperature' in (cur[k].fields||{}) && !('charge_state' in (cur[k].fields||{})))||null;
+    
+    // Identify MPPTs from the static device list (resilient to missing data in current cycle)
+    // We assume any device that isn't a Battery Sense (Sense-12) is an MPPT.
+    const bsDevice = S.devices.find(d => d.id.includes('sense') || d.label.toLowerCase().includes('sense'));
+    S.bsense = bsDevice ? bsDevice.id : null;
+    S.mptts = S.devices.filter(d => d.id !== S.bsense).map(d => d.id).sort();
+
     S.last=Date.now();
     buildTabDefs();
     render();
@@ -579,8 +587,6 @@ function renderFlow(){
   setText('mppt2-label',lbl2);
 
   // PV power: Victron BLE only reports pv_power when actively generating.
-  // Show actual value if present, "0 W" when charger is asleep, "—" when
-  // charger is active but BLE packet doesn't include pv_power this cycle.
   setPvNode(1, m1);
   setPvNode(2, m2);
 
@@ -619,18 +625,18 @@ function renderFlow(){
   setLoadNode(1,m1); setLoadNode(2,m2);
 
   const pv1=pvWatts(m1), pv2=pvWatts(m2);
-  updatePath('path-pv1',   pv1??0,                          '#ffcc33', 50);   // max 50W panel
-  updatePath('path-pv2',   pv2??0,                          '#ffcc33', 50);   // max 50W panel
-  updatePath('path-mppt1', m1?.fields?.charge_current??0,   '#00f2ff',  4);   // max 4A
-  updatePath('path-mppt2', m2?.fields?.charge_current??0,   '#00f2ff',  4);   // max 4A
+  updatePath('path-pv1',   pv1??0,                          '#d97706', 40);   // Darker Amber for solar
+  updatePath('path-pv2',   pv2??0,                          '#d97706', 40);
+  updatePath('path-mppt1', m1?.fields?.charge_current??0,   '#0891b2',  4);   // Deeper Cyan for charging
+  updatePath('path-mppt2', m2?.fields?.charge_current??0,   '#0891b2',  4);
 }
 
 function pvWatts(m){
   if(!m) return null;
   if(m.fields?.pv_power!=null) return m.fields.pv_power;
-  // charge_state=0 (Sleep) ⇒ confirmed zero generation
-  if((m.fields?.charge_state??-1)===0) return 0;
-  return null; // active but BLE packet didn't include pv_power this cycle
+  // If we have charge_state but no pv_power, it's effectively 0 for the flow diagram
+  if('charge_state' in (m.fields||{})) return 0;
+  return null;
 }
 
 function setPvNode(idx,m){
@@ -640,8 +646,8 @@ function setPvNode(idx,m){
   setText(`flow-pv${idx}-volt`, volt!=null ? volt.toFixed(1)+' V' : '—');
   const box=document.getElementById(`pv${idx}-box`);
   if(box){
-    box.style.stroke = (w!=null&&w>5) ? 'rgba(255,204,51,0.55)' : '';
-    box.style.filter = (w!=null&&w>5) ? 'url(#glow)' : '';
+    box.style.stroke = (w!=null&&w>1) ? '#d97706' : '';
+    box.style.filter = (w!=null&&w>1) ? 'url(#glow)' : '';
   }
 }
 
@@ -669,7 +675,7 @@ function setLoadNode(idx,m){
     if(valEl)  valEl.style.fill='';
     setText(`mppt${idx}-load-val`, lp.toFixed(0)+' W');
     if(pth) pth.style.display='';
-    updatePath(`path-mppt${idx}-load`,lp,'#ff4b2b',100);
+    updatePath(`path-mppt${idx}-load`,lp,'#dc2626',100); // Darker Red for load
   }else{
     // Field present but below measurement floor — dim node, static (no animation) line
     if(circle) circle.style.opacity='0.4';
@@ -691,9 +697,18 @@ function updateMpptNode(idx,d){
   const txt=document.getElementById(`mppt${idx}-status-txt`);
   const bg =document.getElementById(`mppt${idx}-status-bg`);
   const box=document.getElementById(`mppt${idx}-box`);
-  if(txt){txt.textContent=st[0];txt.style.fill=st[1]==='#374151'?'#9ca3af':'white';}
-  if(bg) bg.setAttribute('fill',st[1]+'33');
-  if(box) box.style.stroke=st[0]!=='Sleep'?st[1]+'88':'';
+  if(txt){
+    txt.textContent=st[0];
+    // In light mode, always use dark text for the tinted status pill
+    if(isLight()){
+      txt.style.fill='#020617';
+      txt.style.fontWeight='800';
+    } else {
+      txt.style.fill=st[1]==='#374151'?'#9ca3af':'white';
+    }
+  }
+  if(bg) bg.setAttribute('fill',st[1]+(isLight()?'66':'33'));
+  if(box) box.style.stroke=st[0]!=='Sleep'?st[1]+'dd':''; // Brighter border
 
   // MPPT big value: charge current when present, else battery voltage
   const big = d?.fields?.charge_current!=null
@@ -704,9 +719,12 @@ function updateMpptNode(idx,d){
 
 function updatePath(id,val,col,maxVal){
   const p=document.getElementById(id); if(!p) return;
+  // Ensure the base path is always visible
+  p.style.display=''; 
+  
   if(val>0.05){
     const ratio=Math.min(val/maxVal,1);
-    const dur=(Math.max(0.5, 3.0-ratio*2.5)).toFixed(2);
+    const dur=(Math.max(0.3, 2.0-ratio*1.7)).toFixed(2);
     const anim=`dash ${dur}s linear infinite`;
     // Guard: only touch style when values actually change to avoid animation restarts
     if(!p.classList.contains('fl-active') || p.style.stroke!==col || p.style.animation!==anim){
@@ -714,10 +732,11 @@ function updatePath(id,val,col,maxVal){
       p.style.stroke=col;
       p.style.filter='url(#glow)';
       p.style.animation=anim;
+      p.style.strokeWidth='6'; // Extra thick when active
     }
   }else if(p.classList.contains('fl-active')){
     p.classList.remove('fl-active');
-    p.style.stroke=''; p.style.filter=''; p.style.animation='';
+    p.style.stroke=p.style.filter=p.style.animation=p.style.strokeWidth='';
   }
 }
 
