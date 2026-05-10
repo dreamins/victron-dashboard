@@ -128,7 +128,9 @@ class VictronDecoder:
         label   = device.get("label", mac)
         site_id = device.get("site_id", DEFAULT_SITE)
         fields  = {k: float(v) for k, v in raw_fields.items() if isinstance(v, (int, float))}
-        return VictronPacket(dev_id, label, site_id, ts, fields) if fields else None
+        if not fields:
+            return None
+        return VictronPacket(dev_id, label, site_id, ts, self._sanitize_fields(fields))
 
     def _handle_production_packet(self, device: Dict[str, Any], hex_data: str, ts: datetime) -> Optional[VictronPacket]:
         try:
@@ -141,10 +143,16 @@ class VictronDecoder:
             fields = self._extract_fields(parsed)
             if not fields:
                 return None
-            return VictronPacket(device["id"], device["label"], device["site_id"], ts, fields)
+            return VictronPacket(device["id"], device["label"], device["site_id"], ts, self._sanitize_fields(fields))
         except Exception as e:
             log.error("[%s] Decode error: %s", device.get("id"), e)
             return None
+
+    def _sanitize_fields(self, fields: Dict[str, float]) -> Dict[str, float]:
+        # Fix phantom pv_power spikes when device is sleeping (charge_state=0)
+        if fields.get("charge_state", -1) == 0 and "pv_power" in fields:
+            fields["pv_power"] = 0.0
+        return fields
 
     def _extract_fields(self, parsed) -> Dict[str, float]:
         fields: Dict[str, float] = {}
