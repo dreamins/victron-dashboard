@@ -80,7 +80,7 @@ header {
   background:var(--hdr-bg); backdrop-filter:blur(12px);
   border-bottom:1px solid var(--border); z-index:50;
 }
-.logo { display:flex; align-items:center; gap:12px; font-size:18px; font-weight:800; letter-spacing:-0.5px; white-space:nowrap; }
+.logo { display:flex; align-items:center; gap:10px; font-size:18px; font-weight:800; letter-spacing:-0.5px; white-space:nowrap; }
 .logo-icon {
   width:36px; height:36px; border-radius:10px;
   background:linear-gradient(135deg,#ffcc33,#f97316);
@@ -88,7 +88,7 @@ header {
   font-size:20px; box-shadow:0 0 20px rgba(251,191,36,0.3);
 }
 .hdr-right { display:flex; align-items:center; gap:16px; }
-#status-pills { display:flex; align-items:center; gap:12px; }
+#status-pills { display:flex; align-items:center; gap:10px; }
 .s-pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--sub); }
 .s-dot  { width:8px; height:8px; border-radius:50%; }
 .s-dot.on  { background:var(--charge); box-shadow:0 0 10px var(--charge); }
@@ -114,10 +114,10 @@ header {
 #left {
   flex:0 0 42%; display:flex; flex-direction:column;
   overflow-y:auto; overflow-x:hidden;
-  border-right:1px solid var(--border);
+  border-right:2px solid var(--border);
 }
 #flow {
-  padding:14px 20px; flex-shrink:0;
+  padding:4px 20px; flex-shrink:0;
   background: var(--flow-grad);
 }
 #flow svg { width:100%; filter:drop-shadow(0 0 30px rgba(0,0,0,0.15)); }
@@ -134,13 +134,13 @@ body:not(.light) #flow svg { filter:drop-shadow(0 0 30px rgba(0,0,0,0.3)); }
 
 /* ── Cards ───────────────────────────────────────────────────────────── */
 #cards {
-  display:grid; grid-template-columns:repeat(2,1fr); gap:12px;
-  padding:0 20px 20px;
+  display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
+  padding:0 20px 8px;
 }
 .card {
   background:var(--surf-1); backdrop-filter:blur(10px);
   border:1px solid var(--border); border-radius:20px;
-  padding:20px; cursor:pointer; position:relative; overflow:hidden;
+  padding:16px; cursor:pointer; position:relative; overflow:hidden;
   transition:all 0.25s cubic-bezier(0.4,0,0.2,1);
 }
 .card:hover { transform:translateY(-3px); background:var(--surf-2); border-color:rgba(255,255,255,0.15); }
@@ -427,7 +427,7 @@ function fmtWh(v){
 }
 function wTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(1)+' kW':v+' W'; }
 function whTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(2)+' kWh':v+' Wh'; }
-function setText(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
+function setText(id,v){const e=document.getElementById(id);if(e)e.innerHTML=v;}
 
 // ── LiFePO4 4S SOC estimate (resting voltage only - hide while charging) ────
 const LFP_CURVE=[

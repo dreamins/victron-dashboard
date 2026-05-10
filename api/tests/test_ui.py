@@ -102,7 +102,7 @@ def desktop(page: Page, static_server: str) -> Page:
 
 class TestDesktopLayout:
     def test_title(self, desktop):
-        expect(desktop).to_have_title("Solar Monitor")
+        expect(desktop).to_have_title("Solar Monitor v2.2")
 
     def test_three_device_cards(self, desktop):
         """2 MPPTs + 1 battery sense = 3 cards."""
@@ -413,6 +413,8 @@ class TestTodayYield:
         page.wait_for_selector("#cards .card", timeout=6000)
 
         page.locator(".tab-btn").last.click()
+        # Clear captures from initial load before switching range
+        captured_urls.clear()
         page.locator(".r-btn", has_text="7d").click()
         page.wait_for_timeout(600)
 
