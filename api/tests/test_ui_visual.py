@@ -112,3 +112,21 @@ def test_ui_visual_verification(page: Page, static_server: str):
     expect(page.locator("#back-btn")).to_be_visible()
     # Check for SVG content in back button
     assert page.locator("#back-btn svg").count() > 0
+
+    # 8. VERIFY BATTERY TAB GRAPHS
+    # Switch back to desktop view to click the tab
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.click("button:has-text('Battery')")
+    page.wait_for_timeout(500)
+    
+    # Check for the 4 charts in battery tab
+    active_panel = page.locator(".chart-panel.active")
+    titles = active_panel.locator(".chart-title").all_text_contents()
+    assert "Battery Voltage - All Sources" in titles
+    assert "Temperature" in titles
+    assert "Combined Charging Current (A)" in titles
+    assert "Combined Charging Power (W)" in titles
+    
+    # Check if 4 canvases are present
+    assert active_panel.locator("canvas").count() == 4
+

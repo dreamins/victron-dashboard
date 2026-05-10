@@ -565,6 +565,8 @@ function buildTabDefs(){
         <div id="panel-${i}" class="chart-panel ${active}">
           <div class="chart-card"><div class="chart-title">Battery Voltage - All Sources</div><div class="chart-container"><canvas id="chart-${i}-v"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Temperature</div><div class="chart-container"><canvas id="chart-${i}-t"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">Combined Charging Current (A)</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">Combined Charging Power (W)</div><div class="chart-container"><canvas id="chart-${i}-p"></canvas></div></div>
         </div>`;
       // insights
       return `
@@ -881,6 +883,8 @@ async function updateCharts(){
     const voltIds=[...(S.bsense?[S.bsense]:[]),...S.mptts];
     await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,iv,' V');
     if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,iv,'#f97316','\u00B0C');
+    await drawMulti(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,iv,' A');
+    await drawMulti(`chart-${S.tab}-p`,S.mptts,'pv_power',       rng.st,iv,wTick);
   }else{
     await drawMulti(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,iv,wTick);
     await drawDailyBar(`chart-${S.tab}-bar`);
