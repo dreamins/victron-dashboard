@@ -192,21 +192,29 @@ class ResilientInfluxClient:
                     self._cv.wait(timeout=5.0)
                 if not self._buffer:
                     continue
-                packet = self._buffer.popleft()
-            self._write_with_retry(packet)
+                # Drain the entire buffer into a batch
+                batch = []
+                while self._buffer:
+                    batch.append(self._buffer.popleft())
+            
+            if batch:
+                self._write_batch_with_retry(batch)
 
-    def _write_with_retry(self, packet: VictronPacket):
+    def _write_batch_with_retry(self, batch: List[VictronPacket]):
+        records = [p.to_point() for p in batch]
         for delay in RETRY_DELAYS:
             try:
-                self.write_api.write(bucket=INFLUX_BUCKET, record=packet.to_point())
+                self.write_api.write(bucket=INFLUX_BUCKET, record=records)
                 return
             except Exception as e:
-                log.warning("influx write failed: %s; retry in %ds", e, delay)
+                log.warning("influx batch write failed (%d points): %s; retry in %ds", 
+                            len(batch), e, delay)
                 time.sleep(delay)
         try:
-            self.write_api.write(bucket=INFLUX_BUCKET, record=packet.to_point())
+            self.write_api.write(bucket=INFLUX_BUCKET, record=records)
         except Exception as e:
-            log.error("influx write failed after all retries, dropping: %s", e)
+            log.error("influx batch write failed after all retries, dropping %d points: %s", 
+                      len(batch), e)
 
 
 class DecoderService:
