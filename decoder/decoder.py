@@ -179,11 +179,11 @@ class ResilientInfluxClient:
         threading.Thread(target=self._writer_loop, daemon=True).start()
 
     def write(self, packet: VictronPacket):
-        log.info("[%s/%s] %s", packet.site_id, packet.device_id,
-                 " ".join(f"{k}={v}" for k, v in packet.fields.items()))
+        log.debug("[%s/%s] %s", packet.site_id, packet.device_id,
+                  " ".join(f"{k}={v}" for k, v in packet.fields.items()))
         with self._cv:
             self._buffer.append(packet)
-            self._cv.notify()
+            # Removed notify() to allow strictly timed batching (every 5s)
 
     def _writer_loop(self):
         while True:
