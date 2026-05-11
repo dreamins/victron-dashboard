@@ -130,3 +130,61 @@ def test_ui_visual_verification(page: Page, static_server: str):
     # Check if 4 canvases are present
     assert active_panel.locator("canvas").count() == 4
 
+def test_ui_battery_power_math_logic(page: Page, static_server: str):
+    """Verify that Total Charging Power is correctly calculated as I * V."""
+    page.on("console", lambda msg: print(f"CONSOLE: {msg.type}: {msg.text}"))
+    page.on("pageerror", lambda err: print(f"PAGE ERROR: {err.message}"))
+    
+    mock_devices = {"bridge_online": True, "devices": [
+        {"id": "m1", "label": "MPPT 1", "last_seen": "2026-05-10T20:00:00Z", "online": True},
+    ]}
+    # Mock history: 2 Amps at 14.0 Volts = 28 Watts
+    mock_history = {
+        "points": [
+            {"t": "2026-05-10T20:00:00Z", "v": 2.0} # 2A Current
+        ]
+    }
+    mock_voltage = {
+        "points": [
+            {"t": "2026-05-10T20:00:00Z", "v": 14.0} # 14V Voltage
+        ]
+    }
+
+    # Intercept specific fields
+    def handle_route(route):
+        url = route.request.url
+        if "field=charge_current" in url:
+            route.fulfill(json=mock_history)
+        elif "field=battery_voltage" in url:
+            route.fulfill(json=mock_voltage)
+        elif "api/v1/devices" in url:
+            route.fulfill(json=mock_devices)
+        elif "api/v1/current" in url:
+            route.fulfill(json={"m1": {"device": "m1", "label": "MPPT 1", "fields": {"charge_state": 3}}})
+        else:
+            route.fulfill(json={"points": [], "devices": {"devices":[]}, "days": {"days":[]}})
+
+    page.route("**/api/v1/**", handle_route)
+    page.goto(static_server)
+    page.wait_for_function("typeof S !== 'undefined' && S.last !== null")
+    
+    # Switch to Battery tab
+    page.click("button:has-text('Battery')")
+    page.wait_for_timeout(2000) # Give charts time to render
+    
+    # Inspect the Chart data directly via evaluate
+    power_chart_data = page.evaluate('''() => {
+        const cid = `chart-${S.tab}-p`;
+        const chart = CH[cid];
+        if(!chart) return "no_chart";
+        if(!chart.data.datasets[0].data[0]) return "no_data";
+        return chart.data.datasets[0].data[0].y;
+    }''')
+    
+    print(f"DEBUG: power_chart_data={power_chart_data}")
+    # 2A * 14V should be 28W
+    assert power_chart_data == 28
+
+if __name__ == "__main__":
+    import sys
+    pytest.main([__file__])
