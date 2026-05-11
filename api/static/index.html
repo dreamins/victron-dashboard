@@ -885,7 +885,7 @@ async function updateCharts(){
     await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,iv,' V');
     if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,iv,'#f97316','\u00B0C');
     await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,iv,' A',     'Total Charging Current','#10b981');
-    await drawSum(`chart-${S.tab}-p`,S.mptts,'pv_power',       rng.st,iv,wTick,   'Total Charging Power',  '#f59e0b');
+    await drawBatteryPower(`chart-${S.tab}-p`,S.mptts,rng.st,iv,wTick,'Total Charging Power','#f59e0b');
   }else{
     await drawSum(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,iv,wTick, 'Total Solar Output','#f59e0b');
     await drawDailyBar(`chart-${S.tab}-bar`);
@@ -964,6 +964,40 @@ async function drawSum(cid,ids,field,start,iv,unit,label,col){
   
   const sortedTs = Object.keys(sumMap).sort();
   const data = sortedTs.map(t=>({x:t, y:sumMap[t]}));
+
+  if(CH[cid])CH[cid].destroy();
+  CH[cid]=new Chart(canvas,{
+    type:'line',
+    data:{datasets:[{label, data, borderColor:col, backgroundColor:grad(ctx,col), fill:true, borderWidth:2, pointRadius:0, tension:0.3}]},
+    options:baseOpts(unit)
+  });
+}
+
+async function drawBatteryPower(cid,ids,start,iv,unit,label,col){
+  const canvas=document.getElementById(cid); if(!canvas)return;
+  const ctx=canvas.getContext('2d');
+  
+  // Fetch all currents and one voltage series
+  const [currentResults, voltageRes] = await Promise.all([
+    Promise.all(ids.map(id => hFetch(id, 'charge_current', start, iv))),
+    hFetch(S.bsense || ids[0], 'battery_voltage', start, iv)
+  ]);
+
+  const vMap = {};
+  (voltageRes.points||[]).forEach(p => { vMap[p.t] = p.v; });
+
+  const sumMap = {};
+  currentResults.forEach(res => {
+    (res.points||[]).forEach(p => {
+      const v = vMap[p.t] || 0;
+      if (v > 0) {
+        sumMap[p.t] = (sumMap[p.t]||0) + (p.v * v);
+      }
+    });
+  });
+
+  const sortedTs = Object.keys(sumMap).sort();
+  const data = sortedTs.map(t => ({x:t, y:Math.round(sumMap[t])}));
 
   if(CH[cid])CH[cid].destroy();
   CH[cid]=new Chart(canvas,{
