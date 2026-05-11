@@ -149,9 +149,21 @@ class VictronDecoder:
             return None
 
     def _sanitize_fields(self, fields: Dict[str, float]) -> Dict[str, float]:
-        # Fix phantom pv_power spikes when device is sleeping (charge_state=0)
-        if fields.get("charge_state", -1) == 0 and "pv_power" in fields:
+        # 1. Fix phantom spikes when device is sleeping (charge_state=0)
+        if fields.get("charge_state", -1) == 0:
+            if "pv_power" in fields: fields["pv_power"] = 0.0
+            if "charge_current" in fields: fields["charge_current"] = 0.0
+            
+        # 2. Apply noise floors (per-packet). 
+        # We use 0.5W to allow real 1W loads but kill sub-1W math noise.
+        # current floor remains at 0.05A as 0.1A is the lowest 'legit' reading.
+        if "pv_power" in fields and fields["pv_power"] < 0.5:
             fields["pv_power"] = 0.0
+        if "load_power" in fields and fields["load_power"] < 0.5:
+            fields["load_power"] = 0.0
+        if "charge_current" in fields and fields["charge_current"] < 0.05:
+            fields["charge_current"] = 0.0
+            
         return fields
 
     def _extract_fields(self, parsed) -> Dict[str, float]:
@@ -201,6 +213,23 @@ class ResilientInfluxClient:
                 self._write_batch_with_retry(batch)
 
     def _write_batch_with_retry(self, batch: List[VictronPacket]):
+        # Batch Smoothing: distinguish isolated noise from steady 1W loads.
+        # Group by device and field, calculate average.
+        dev_stats: Dict[str, Dict[str, List[float]]] = collections.defaultdict(lambda: collections.defaultdict(list))
+        for p in batch:
+            for f, v in p.fields.items():
+                if f in ["pv_power", "load_power", "charge_current"]:
+                    dev_stats[p.device_id][f].append(v)
+        
+        # If the average for the 5s window is too low, it's isolated noise, not 'steady'.
+        for p in batch:
+            for f in ["pv_power", "load_power", "charge_current"]:
+                if f in p.fields:
+                    avg = sum(dev_stats[p.device_id][f]) / len(dev_stats[p.device_id][f])
+                    threshold = 0.5 if f != "charge_current" else 0.02
+                    if avg < threshold:
+                        p.fields[f] = 0.0
+
         records = [p.to_point() for p in batch]
         for delay in RETRY_DELAYS:
             try:
