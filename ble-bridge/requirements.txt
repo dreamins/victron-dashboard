@@ -1,3 +1,4 @@
 bleak>=0.21
 victron-ble>=0.8.0
 influxdb-client>=1.39
+pytest>=7
