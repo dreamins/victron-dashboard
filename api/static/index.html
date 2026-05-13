@@ -376,8 +376,12 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 
 <script>
 const RANGES=[
-  {l:'1h',s:3600,st:'-1h'},{l:'6h',s:21600,st:'-6h'},{l:'24h',s:86400,st:'-24h'},
-  {l:'7d',s:604800,st:'-7d'},{l:'30d',s:2592000,st:'-30d'},{l:'All',s:31536000,st:'-365d'}
+  {l:'1h', s:3600,     st:'-1h'},
+  {l:'6h', s:21600,    st:'-6h'},
+  {l:'24h',s:86400,    st:'-24h'},
+  {l:'7d', s:604800,   st:'-7d'},
+  {l:'30d',s:2592000,  st:'-30d', iv:'1h'},
+  {l:'All',s:31536000, st:'-365d',iv:'1d'},
 ];
 const STATES={
   0:['Not charging','#374151'],
@@ -871,7 +875,7 @@ async function updateCharts(){
   if(!S.tabDefs.length) return;
   const def=S.tabDefs[S.tab]; if(!def) return;
   const rng=RANGES.find(r=>r.l===S.range);
-  const iv=Math.max(1,Math.ceil(rng.s/500))+'s';
+  const iv=rng.iv||Math.max(1,Math.ceil(rng.s/500))+'s';
 
   if(def.kind==='mppt'){
     const id=def.id;
