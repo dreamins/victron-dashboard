@@ -6,6 +6,11 @@ services:
       - MQTT_ESP32_PASS=test_esp32_pass
       - MQTT_DECODER_PASS=test_decoder_pass
 
+  influxdb:
+    environment:
+      - DOCKER_INFLUXDB_INIT_PASSWORD=test_influx_admin_pass
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=test_influx_token_aabbccdd1122
+
   ble-decoder:
     volumes:
       - ./decoder/fixtures/sites_fixture.json:/app/sites.json:ro
@@ -21,6 +26,7 @@ services:
     volumes:
       - ./api/tests/sites_fixture.json:/app/sites_fixture.json:ro
     environment:
+      - INFLUX_TOKEN=test_influx_token_aabbccdd1122
       - INFLUX_BUCKET=victron_test
       - INFLUX_BUCKET_MEDIUM=victron_test
       - INFLUX_BUCKET_HOURLY=victron_test

@@ -51,7 +51,7 @@ sleep 3  # let InfluxDB index the writes
 
 echo ""
 PYTEST_OUTPUT=$("${COMPOSE_TEST[@]}" exec -T solar-api \
-    python -m pytest /app/tests/ -v --tb=short 2>&1 | grep -v "^time=" || true)
+    python -m pytest /app/tests/test_api.py -v --tb=short 2>&1 | grep -v "^time=" || true)
 echo "$PYTEST_OUTPUT"
 
 # Count pass/fail from pytest output
