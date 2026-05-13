@@ -380,8 +380,8 @@ const RANGES=[
   {l:'6h', s:21600,    st:'-6h'},
   {l:'24h',s:86400,    st:'-24h'},
   {l:'7d', s:604800,   st:'-7d'},
-  {l:'30d',s:2592000,  st:'-30d', iv:'1h'},
-  {l:'All',s:31536000, st:'-365d',iv:'1d'},
+  {l:'30d',s:2592000,  st:'-30d'},
+  {l:'All',s:31536000, st:'-365d'},
 ];
 const STATES={
   0:['Not charging','#374151'],
@@ -875,29 +875,27 @@ async function updateCharts(){
   if(!S.tabDefs.length) return;
   const def=S.tabDefs[S.tab]; if(!def) return;
   const rng=RANGES.find(r=>r.l===S.range);
-  const iv=rng.iv||Math.max(1,Math.ceil(rng.s/500))+'s';
-
   if(def.kind==='mppt'){
     const id=def.id;
-    await drawLine(`chart-${S.tab}-p`, id,'pv_power',       rng.st,iv,'#ffcc33',wTick);
-    await drawLine(`chart-${S.tab}-pv`,id,'pv_voltage',     rng.st,iv,'#a78bfa',' V');
-    await drawLine(`chart-${S.tab}-c`, id,'charge_current', rng.st,iv,'#10b981',' A');
-    await drawLine(`chart-${S.tab}-v`, id,'battery_voltage',rng.st,iv,'#00f2ff',' V');
-    await drawLine(`chart-${S.tab}-l`, id,'load_power',     rng.st,iv,'#f97316',wTick);
+    await drawLine(`chart-${S.tab}-p`, id,'pv_power',       rng.st,'#ffcc33',wTick);
+    await drawLine(`chart-${S.tab}-pv`,id,'pv_voltage',     rng.st,'#a78bfa',' V');
+    await drawLine(`chart-${S.tab}-c`, id,'charge_current', rng.st,'#10b981',' A');
+    await drawLine(`chart-${S.tab}-v`, id,'battery_voltage',rng.st,'#00f2ff',' V');
+    await drawLine(`chart-${S.tab}-l`, id,'load_power',     rng.st,'#f97316',wTick);
   }else if(def.kind==='battery'){
     const voltIds=[...(S.bsense?[S.bsense]:[]),...S.mptts];
-    await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,iv,' V');
-    if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,iv,'#f97316','\u00B0C');
-    await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,iv,' A',     'Total Charging Current','#10b981');
-    await drawBatteryPower(`chart-${S.tab}-p`,S.mptts,rng.st,iv,wTick,'Total Charging Power','#f59e0b');
+    await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,' V');
+    if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,'#f97316','\u00B0C');
+    await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,' A',     'Total Charging Current','#10b981');
+    await drawBatteryPower(`chart-${S.tab}-p`,S.mptts,rng.st,wTick,'Total Charging Power','#f59e0b');
   }else{
-    await drawSum(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,iv,wTick, 'Total Solar Output','#f59e0b');
+    await drawSum(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,wTick, 'Total Solar Output','#f59e0b');
     await drawDailyBar(`chart-${S.tab}-bar`);
   }
 }
 
-async function hFetch(dev,field,start,iv){
-  const r=await fetch(`/api/v1/history?device=${encodeURIComponent(dev)}&field=${field}&start=${start}&interval=${iv}`);
+async function hFetch(dev,field,start,maxPts=500){
+  const r=await fetch(`/api/v1/history?device=${encodeURIComponent(dev)}&field=${field}&start=${start}&max_points=${maxPts}`);
   return r.json();
 }
 
@@ -919,8 +917,8 @@ function baseOpts(unit){
   };
 }
 
-async function drawLine(cid,dev,field,start,iv,col,unit){
-  const res=await hFetch(dev,field,start,iv);
+async function drawLine(cid,dev,field,start,col,unit){
+  const res=await hFetch(dev,field,start);
   const canvas=document.getElementById(cid); if(!canvas)return;
   if(CH[cid])CH[cid].destroy();
   const ctx=canvas.getContext('2d');
@@ -933,12 +931,12 @@ async function drawLine(cid,dev,field,start,iv,col,unit){
   });
 }
 
-async function drawMulti(cid,ids,field,start,iv,unit){
+async function drawMulti(cid,ids,field,start,unit){
   const canvas=document.getElementById(cid); if(!canvas)return;
   const ctx=canvas.getContext('2d');
   const COLS=['#00f2ff','#ffcc33','#10b981','#a78bfa'];
   const datasets=await Promise.all(ids.map(async(id,i)=>{
-    const res=await hFetch(id,field,start,iv);
+    const res=await hFetch(id,field,start);
     const col=COLS[i%COLS.length];
     return{label:S.current[id]?.label||id,
       data:(res.points||[]).map(p=>({x:p.t,y:p.v})),
@@ -954,10 +952,10 @@ async function drawMulti(cid,ids,field,start,iv,unit){
   });
 }
 
-async function drawSum(cid,ids,field,start,iv,unit,label,col){
+async function drawSum(cid,ids,field,start,unit,label,col){
   const canvas=document.getElementById(cid); if(!canvas)return;
   const ctx=canvas.getContext('2d');
-  const results=await Promise.all(ids.map(id=>hFetch(id,field,start,iv)));
+  const results=await Promise.all(ids.map(id=>hFetch(id,field,start)));
   
   const sumMap={};
   results.forEach(res=>{
@@ -977,14 +975,14 @@ async function drawSum(cid,ids,field,start,iv,unit,label,col){
   });
 }
 
-async function drawBatteryPower(cid,ids,start,iv,unit,label,col){
+async function drawBatteryPower(cid,ids,start,unit,label,col){
   const canvas=document.getElementById(cid); if(!canvas)return;
   const ctx=canvas.getContext('2d');
-  
+
   // Fetch all currents and one voltage series
   const [currentResults, voltageRes] = await Promise.all([
-    Promise.all(ids.map(id => hFetch(id, 'charge_current', start, iv))),
-    hFetch(S.bsense || ids[0], 'battery_voltage', start, iv)
+    Promise.all(ids.map(id => hFetch(id, 'charge_current', start))),
+    hFetch(S.bsense || ids[0], 'battery_voltage', start)
   ]);
 
   const vMap = {};

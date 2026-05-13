@@ -26,6 +26,23 @@ SEVEN_DAYS_S  = 7 * 86400
 ONE_YEAR_S    = 365 * 86400
 
 YIELD_FIELDS = {"yield_today", "yield_total"}
+
+# Natural aggregation intervals in seconds, ascending.
+# _auto_interval rounds DOWN to the largest one that fits, giving slightly
+# more points than max_points but at a clean human-readable granularity.
+_NATURAL_IV = [1, 5, 10, 30, 60, 120, 300, 600, 900, 1800,
+               3600, 7200, 14400, 21600, 43200, 86400]
+
+
+def _auto_interval(range_s: int, max_points: int) -> str:
+    target = max(1, range_s // max_points)
+    result = _NATURAL_IV[0]
+    for iv in _NATURAL_IV:
+        if iv <= target:
+            result = iv
+        else:
+            break
+    return f"{result}s"
 VALID_FIELDS = {
     "pv_power", "pv_voltage", "battery_voltage", "charge_current",
     "load_current", "load_power", "load_state", "charge_state",
@@ -160,7 +177,7 @@ from(bucket: "{INFLUX_BUCKET}")
         return result
 
     def get_history(self, device: str, field: str, start_s: int, interval: str,
-                    site: Optional[str] = None) -> Dict[str, Any]:
+                    site: Optional[str] = None, max_points: int = 500) -> Dict[str, Any]:
         fn   = "max" if field in YIELD_FIELDS else "mean"
         segs = self._stitch(start_s)
         bucket_names = [s[0] for s in segs]
@@ -204,6 +221,7 @@ from(bucket: "{bucket}")
             "device":       device,
             "field":        field,
             "unit":         FIELD_UNITS.get(field, ""),
+            "interval":     interval,
             "buckets_used": bucket_names,
             "points":       sorted(seen_t.values(), key=lambda p: p["t"]),
         }
@@ -304,23 +322,25 @@ def current(site: Optional[str] = Query(default=None)):
 
 @app.get("/api/v1/history")
 def history(
-    device:   str = Query(...),
-    field:    str = Query(...),
-    start:    str = Query(...),
-    interval: str = Query(...),
-    site: Optional[str] = Query(default=None),
+    device:     str            = Query(...),
+    field:      str            = Query(...),
+    start:      str            = Query(...),
+    interval:   Optional[str]  = Query(default=None),
+    max_points: int            = Query(default=500, ge=1, le=5000),
+    site:       Optional[str]  = Query(default=None),
 ):
     if not _ID_RE.match(device):
         raise HTTPException(400, "invalid device")
     if field not in VALID_FIELDS:
         raise HTTPException(400, "invalid field")
-    if not _DURATION_RE.match(interval):
+    if interval is not None and not _DURATION_RE.match(interval):
         raise HTTPException(400, "invalid interval")
     try:
         range_s = _parse_s(start)
     except ValueError:
         raise HTTPException(400, "invalid start")
-    return repo.get_history(device, field, range_s, interval, site=site)
+    iv = interval if interval is not None else _auto_interval(range_s, max_points)
+    return repo.get_history(device, field, range_s, iv, site=site)
 
 
 @app.get("/api/v1/daily")
