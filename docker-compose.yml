@@ -66,6 +66,9 @@ services:
       - INFLUX_ORG=home
       - INFLUX_BUCKET=victron
       - TZ_OFFSET_HOURS=${TZ_OFFSET_HOURS:-0}
+      - SITES_FILE=/app/sites.json
+    volumes:
+      - ./config/sites.json:/app/sites.json:ro
     restart: unless-stopped
 
   oauth2-proxy:
