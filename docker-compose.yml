@@ -73,6 +73,22 @@ services:
       - ./config/sites.json:/app/sites.json:ro
     restart: unless-stopped
 
+  ble-bridge:
+    build: ./ble-bridge
+    privileged: true
+    depends_on:
+      - influxdb
+    volumes:
+      - /var/run/dbus:/var/run/dbus:ro
+      - ./config/sites.json:/app/sites.json:ro
+    environment:
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUX_ORG=home
+      - INFLUX_BUCKET=victron
+      - SITES_FILE=/app/sites.json
+    restart: unless-stopped
+
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
     # --upstream must be a CLI arg; env var is ignored for strings-type flags in pflag

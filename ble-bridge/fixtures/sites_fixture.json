@@ -1,0 +1,31 @@
+{
+  "sites": [
+    {
+      "id": "garage",
+      "label": "Garage",
+      "tz_offset_hours": 0,
+      "bridge": "linux_ble",
+      "ui": {
+        "show_loads": false,
+        "battery_display": "bms",
+        "mppt_count": 2
+      },
+      "devices": [
+        {
+          "id": "garage_mppt1",
+          "label": "Garage MPPT 1",
+          "type": "victron_mppt",
+          "mac": "AA:BB:CC:DD:EE:11",
+          "key": "aabbccddeeff00112233445566778811"
+        },
+        {
+          "id": "garage_mppt2",
+          "label": "Garage MPPT 2",
+          "type": "victron_mppt",
+          "mac": "AA:BB:CC:DD:EE:22",
+          "key": "aabbccddeeff00112233445566778822"
+        }
+      ]
+    }
+  ]
+}

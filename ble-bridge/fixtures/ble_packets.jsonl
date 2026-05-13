@@ -1,0 +1,4 @@
+{"mac": "AA:BB:CC:DD:EE:11", "raw": {"pv_power": 150.0, "pv_voltage": 18.5, "battery_voltage": 13.2, "charge_current": 11.3, "charge_state": 3, "yield_today": 0.85, "yield_total": 412.0}}
+{"mac": "AA:BB:CC:DD:EE:22", "raw": {"pv_power": 120.0, "pv_voltage": 17.9, "battery_voltage": 13.1, "charge_current": 9.1, "charge_state": 3, "yield_today": 0.72, "yield_total": 388.0}}
+{"mac": "AA:BB:CC:DD:EE:11", "raw": {"pv_power": 152.0, "pv_voltage": 18.6, "battery_voltage": 13.3, "charge_current": 11.4, "charge_state": 3, "yield_today": 0.86, "yield_total": 412.0}}
+{"mac": "AA:BB:CC:DD:EE:22", "raw": {"pv_power": 121.0, "pv_voltage": 17.9, "battery_voltage": 13.1, "charge_current": 9.2, "charge_state": 3, "yield_today": 0.73, "yield_total": 388.0}}

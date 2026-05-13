@@ -20,6 +20,16 @@ services:
       - INFLUX_BUCKET=victron_test
       - SITES_FILE=/app/sites.json
 
+  ble-bridge:
+    volumes:
+      - ./ble-bridge/fixtures/sites_fixture.json:/app/sites.json:ro
+      - ./ble-bridge/fixtures/ble_packets.jsonl:/app/fixtures/ble_packets.jsonl:ro
+    environment:
+      - BLE_FIXTURE_FILE=/app/fixtures/ble_packets.jsonl
+      - INFLUX_TOKEN=test_influx_token_aabbccdd1122
+      - INFLUX_BUCKET=victron_test
+    restart: "no"
+
   solar-api:
     ports:
       - "8081:8080"
