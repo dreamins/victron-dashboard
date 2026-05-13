@@ -2,53 +2,112 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Status
+---
 
-Phase 1 (ESP32 firmware + MQTT broker) is **complete and verified** — real Victron BLE payloads flowing to production MQTT at `<SERVER_IP>`. Phase 2 (server infrastructure) is **complete and verified** — 4 InfluxDB buckets + 4 downsampling tasks confirmed. Phase 3 (BLE decoder) is **complete and verified**. Phase 4 (API service) is **complete and verified** — 22/22 tests pass; bucket stitching, MAX aggregation for yield fields, timezone-aware daily, bridge/device online logic all confirmed. Phase 5 (Dashboard UI) is **complete and verified** — 7/7 automated checks pass; dashboard served at port 8081 with animated SVG flow, BRIDGE/DEVICE offline distinction, Chart.js tabs, 500-point interval ceiling. — all 3 real devices (mppt_2, mppt_1, battery_sense) decoding and writing to `victron` bucket at ~1/second; 8/8 isolated tests pass including InfluxDB outage resilience. Phase 6 (Auth + TLS) is **complete and verified** — nginx TLS on port 8443, oauth2-proxy Google OAuth, configured allowed email reaches dashboard, other accounts blocked. Key fixes: `SameSite=lax` for OAuth redirect cookies; oauth2-proxy pinned to `v7.6.0` (latest broke upstream env var); `--upstream` passed as CLI arg (pflag ignores env var for `strings`-type flags). Phase 7 (Multi-site foundation) is **complete and verified** — `sites.json` config, `site` tag on all InfluxDB writes, `/api/v1/sites` endpoint, `?site=` filter on all endpoints, 35/35 tests pass. Phase 7.5 (Historical data migration) is **complete** — `migrate_site_tags.py` backfilled `site=home` onto all 3 InfluxDB buckets (10.9M raw + 27k medium + 2.3k hourly records).
+## What This Project Is
 
-The full system design lives in `victron-system-design.md` (v4.3). That document is the authoritative specification.
+A **self-hosted solar energy monitoring system** for Victron BLE devices. No cloud dependency — all data is local.
 
-## Installation
+**Installation 1 (Home):** 2× Victron MPPT charge controllers + 1× Victron Battery Sense, bridged to the server via an ESP32 over MQTT.
 
-**Prerequisites:** Linux server (tested: Ubuntu/Debian with Docker), ESP32-S3 dev board, Windows PC for flashing.
+**Installation 2 (Garage):** 2× Victron 150/75 MPPT charge controllers + 1× LiTime BMS battery. The Linux server is physically next to these devices, so it scans BLE directly — no ESP32 needed.
 
-**Flashing the ESP32 (Windows, one-time):**
-1. Install ESPHome: `pip install esphome`
-2. Copy `esp32/secrets.yaml.example` → `esp32/secrets.yaml` and fill in values (or run `setup.sh` on the Linux server first — it generates the file)
-3. Plug in ESP32-S3 via USB; identify the COM port (Device Manager → Ports)
-4. `cd esp32 && esphome run victron-bridge.yaml --device COMx`
+Both installations write to the same InfluxDB instance (tagged by `site`), served by one API and one dashboard with a site selector.
 
-**Server setup (Linux, interactive):**
+---
+
+## Current Status
+
+| Phase | Description | Status |
+|---|---|---|
+| 1 | ESP32 firmware (ESPHome, passive BLE scanner) | ✅ Complete |
+| 2 | Server infrastructure (Docker, Mosquitto, InfluxDB, downsampling) | ✅ Complete |
+| 3 | BLE decoder (MQTT → InfluxDB for home ESP32 path) | ✅ Complete |
+| 4 | API service (FastAPI, bucket stitching, daily yield) | ✅ Complete |
+| 5 | Dashboard UI (animated SVG flow, Chart.js, offline detection) | ✅ Complete |
+| 6 | Auth + TLS (nginx, oauth2-proxy, Google OAuth) | ✅ Complete |
+| 7 | Multi-site foundation (`sites.json`, `site` tag, `/api/v1/sites`) | ✅ Complete — 35/35 tests |
+| 7.5 | Historical data migration (backfill `site=home` on all records) | ✅ Complete — 10.9M raw + 27k medium + 2.3k hourly records |
+| 8 | Linux BLE bridge for garage Victron MPPTs | ✅ Complete — 16 unit + 4 integration tests |
+| 9 | LiTime BMS support (active BLE poll, `battery` measurement) | Not started |
+| 10 | Multi-site API (full test coverage, battery endpoint) | Not started |
+| 11 | Dashboard multi-site UI (site selector, BMS widget, topology switching) | Not started |
+| 12 | Setup.sh multi-site wizard | Not started |
+
+---
+
+## Phase 8 — Complete
+
+**Goal:** Garage Victron MPPTs decode and write to InfluxDB without an ESP32, using the Linux server's built-in Bluetooth adapter (`hci0`).
+
+**Result:** 16/16 unit tests + 4/4 integration tests pass.
+
+**Root cause of previous 401 failures:** `test_phase8.sh` was passing the hardcoded test token (`test_influx_token_aabbccdd1122`) to the integration test container instead of the real production token. Fixed by reading `INFLUXDB_TOKEN` from `.env`.
+
+**Infrastructure facts:**
+- Linux server: `<SERVER_USER>@<SERVER_IP>` (see your local notes — not committed)
+- Production stack is running (do not `docker compose down`)
+- InfluxDB only accessible inside Docker network as `http://influxdb:8086`
+- Token lives in `.env` as `INFLUXDB_TOKEN=<64-char hex>`
+- Org name is `home`; test bucket is `victron_test`
+
+**Test command (run on Linux server):**
 ```bash
-git clone <repo> ~/victron-dashboard
-cd ~/victron-dashboard
-./setup.sh   # interactive — asks for WiFi SSID, generates all credentials, starts Docker stack
+cd ~/victron-dashboard && bash test_phase8.sh 2>&1 | tail -40
 ```
-`setup.sh` is idempotent: re-running it skips already-done steps. It writes `esp32/secrets.yaml` (for ESP32 flashing) and `.env` (for Docker) — both gitignored.
 
-**Hardware notes:**
-- Board: ESP32-S3 (`esp32-s3-devkitc-1`), flashed from Windows via USB
-- ESP32 at `<ESP32_IP>` on local LAN; web UI at `http://<ESP32_IP>/`
-- Production MQTT broker: `<SERVER_IP>`:1883 (LAN-only, no anonymous access)
+---
 
-## What This Is
+## Full System Design (Summary)
 
-A self-hosted solar energy monitoring system for Victron BLE devices (2× MPPT charge controllers + 1× Battery Sense), bridged via an ESP32 over MQTT to a local Linux server. No cloud dependency; all data stays local.
+The authoritative spec is `multi-site-design.md` (v5.0). Summary of what we're building:
 
-## Planned Commands
-
-```bash
-# Deployment
-./setup.sh                          # 6-phase interactive install wizard (idempotent)
-docker compose up -d                # Production stack
-docker compose -f docker-compose.yml -f docker-compose.test.yml up -d  # Test mode
-
-# Development & testing
-python3 decoder/discover.py         # Scan for Victron BLE MACs (run before Phase 3)
-python3 decoder/replay.py           # Replay fixture data from decoder/fixtures/victron_sample.jsonl
-python3 api/seed_test_data.py       # Seed InfluxDB test bucket with synthetic data
-python3 -m pytest api/tests/ -v     # Run API test suite
 ```
+── Home installation ─────────────────────────────────────────────────────
+ Victron BLE devices
+   → ESP32 (ESPHome, passive scanner, WiFi)
+   → MQTT: victron/home/raw
+                                    ↘
+── Garage installation ────────────   mosquitto (single broker)
+ Victron 150/75 MPPTs (BLE)           ↓
+   → ble-bridge (bleak passive)    ble-decoder (victron/+/raw)
+   → MQTT: victron/garage/raw ↗        ↓
+                                   InfluxDB (site tag on all points)
+ LiTime BMS (BLE active poll)          ↓
+   → ble-bridge (direct write) ─── solar-api (multi-site)
+                                       ↓
+                                  nginx + oauth2-proxy
+                                       ↓
+                                  Dashboard (site selector)
+```
+
+### Phase 9 — LiTime BMS
+- `ble-bridge/drivers/litime.py`: active BLE connection, poll every 5s, parse 105-byte response
+- Writes to `battery` measurement with `soc`, `soh`, `cycles`, `temperature`, `cell_min`, `cell_max`, `cell_avg`, `battery_voltage`, `battery_current`
+- On disconnect: exponential backoff reconnect [5, 10, 20, 40s]
+- New API endpoint: `GET /api/v1/battery?site=&device=`
+
+### Phase 10 — Multi-site API
+- `GET /api/v1/sites` returns site list with `ui` config block per site
+- All endpoints accept `?site=` filter
+- `api/tests/test_endpoints.py` expanded to 30+ tests covering both sites and battery endpoint
+- `api/seed_test_data.py` seeds `solar` + `battery` measurements for both sites
+
+### Phase 11 — Dashboard multi-site UI
+- Site selector appears in header when >1 site configured
+- Energy flow SVG topology driven by `ui.mppt_count`, `ui.show_loads` from `/api/v1/sites`
+- Battery widget: two variants — `sense` (voltage+temp) and `bms` (SOC bar, cell delta, cycles)
+- Garage site: no load node, BMS battery widget
+- Home site: load node visible, sense battery widget
+
+### Phase 12 — Setup.sh multi-site wizard
+- Interactive wizard: asks number of sites, IDs, labels, bridge types, device MACs+keys
+- Writes `config/sites.json`
+- Checks for hci0; installs `firmware-atheros` if absent
+- Pre-commit hook: blocks commits containing real MAC addresses
+- Fully idempotent
+
+---
 
 ## Architecture
 
@@ -56,96 +115,123 @@ python3 -m pytest api/tests/ -v     # Run API test suite
 Internet → nginx (8443 TLS) → oauth2-proxy (Google OAuth) → solar-api (FastAPI :8080)
                                                                   ↕
                                               influxdb (4 buckets: raw/medium/hourly/test)
-                                                                  ↑
-                                              ble-decoder (MQTT subscriber → InfluxDB writer)
-                                                                  ↑
-                                              mosquitto (MQTT broker, LAN-only :1883)
-                                                                  ↑
-                                              ESP32 victron-bridge (passive BLE scanner)
-                                                                  ↑
-                                              Victron devices (BLE advertisements)
+                                                         ↑               ↑
+                                    ble-decoder (MQTT→InfluxDB)   ble-bridge (BLE→InfluxDB)
+                                                ↑                       ↑
+                                    mosquitto (MQTT :1883)        bleak + BlueZ (hci0)
+                                                ↑
+                                    ESP32 victron-bridge (home)
 ```
 
-**Data flow:** Victron devices broadcast encrypted BLE advertisements → ESP32 publishes raw bytes + MAC to `victron/raw` MQTT topic → `ble-decoder` decrypts (AES-128-CTR per device) and writes to InfluxDB with server-side timestamp → `solar-api` stitches buckets for resolution continuity → dashboard polls every 2 seconds.
+**Data flow (home):** Victron BLE → ESP32 → MQTT `victron/home/raw` → ble-decoder → InfluxDB `solar` measurement, `site=home`
 
-## Working Style
+**Data flow (garage):** Victron BLE → ble-bridge (bleak passive scan) → InfluxDB `solar` measurement, `site=garage`
+LiTime BMS → ble-bridge (bleak active poll) → InfluxDB `battery` measurement, `site=garage`
 
-**Never declare a phase complete unless every acceptance criterion in victron-system-design.md §12 is met** — including physical steps (flashing hardware, running setup.sh, verifying real device data). The isolated test passing is a sub-step, not completion.
-
-**Never push to GitHub unless the user explicitly requests it.** Commit locally freely; push only on explicit instruction.
-
-**Never give the user a list of commands to run manually.** Tests, setup, git operations — all go into scripts. The user runs one thing and gets a PASS/FAIL result. When something requires the Linux machine, ask for the output of ONE command, not a sequence.
-
-**ALWAYS add new automated tests (unit or UI) with every code change or feature implementation.** Never assume a change is correct without verification. Every commit must be backed by new or updated tests.
-
-## Credentials and Configuration
-
-**All production credentials are generated by `setup.sh`** — never hardcoded. `setup.sh` uses `openssl rand -hex 16` and writes output to `esp32/secrets.yaml` and `.env` (both gitignored). Do not invent placeholder values for production configs; use `${VAR}` references and let `setup.sh` supply them.
-
-**Test credentials are hardcoded** in `docker-compose.test.yml` and `decoder/replay.py` — this is intentional. They are committed to the repo and used only in the isolated test environment. The pattern is: `test_esp32_pass` (ESP32 MQTT), `test_decoder_pass` (decoder MQTT).
-
-**`secrets.yaml.example`** shows key names only — values are filled by `setup.sh`.
-
-## Key Design Decisions
-
-**ESP32 BLE duty cycle is 50%** — time-slices the single 2.4 GHz antenna between WiFi and BLE. Do not change this; continuous scanning causes WiFi disconnects.
-
-**Server-side timestamps only** — `ble-decoder` timestamps on MQTT receipt. The ESP32 never provides timestamps (avoids clock drift). This is intentional.
-
-**Field-specific downsampling** — `yield_today` and `yield_total` are cumulative counters and must use `MAX` in InfluxDB tasks. Instantaneous fields (power, voltage, current) use `MEAN`. Mixing these is a data integrity bug.
-
-**Bucket stitching in the API** — `/api/v1/history` always serves 1-second resolution for the last hour (raw bucket), 5-minute resolution for older data (medium bucket), and 1-hour resolution for very old data (hourly bucket). The stitching logic must handle overlapping time boundaries correctly.
-
-**500-point ceiling** — the API computes intervals to cap responses at 500 points per series. The dashboard charts are ~800px wide; more points are wasted bytes.
-
-**BRIDGE_OFFLINE vs DEVICE_OFFLINE** — these are distinct states in the API and UI. `BRIDGE_OFFLINE` means the ESP32/MQTT path is down; `DEVICE_OFFLINE` means a specific Victron device has stopped broadcasting. Do not conflate them.
-
-**OAuth is enforced by oauth2-proxy, not the API** — `solar-api` has no auth layer. Security depends on nginx routing all traffic through oauth2-proxy first. Never expose the API port directly.
-
-**Encryption keys are file-mounted, not env vars** — `config/devices.json` (gitignored) contains per-device AES-128-CTR keys. It is mounted read-only into the decoder container.
-
-## Build Phases
-
-The design doc defines 6 isolated phases, each with acceptance criteria:
-1. ✅ ESP32 firmware (`esp32/victron-bridge.yaml` via ESPHome) — real payloads flowing
-2. ✅ Server infrastructure (Docker, Mosquitto, InfluxDB with downsampling tasks) — 4 buckets + 4 tasks verified
-3. ✅ BLE decoder + device discovery (`decoder/`) — 8/8 tests pass; real devices live in `victron` bucket
-4. ✅ API service (`api/main.py`, bucket stitching, timezone-aware `/daily`) — 22/22 tests pass
-5. ✅ Dashboard UI (`api/static/index.html`, animated SVG energy flow) — 7/7 automated checks pass; manual browser verification pending
-6. Auth + TLS (nginx, oauth2-proxy, Let's Encrypt DNS-01)
-
-**ESP32-S3 specifics (learned during Phase 1):** board target is `esp32-s3-devkitc-1`, variant `esp32s3`. BLE UUID type lives in `esphome::esp32_ble` namespace — reference as `esp32_ble::ESPBTUUID::from_uint16()` in lambdas (the old `espbt::` namespace is gone in ESPHome 2026).
-
-**InfluxDB init scripts (Phase 2):** `influxdb/init/` scripts run once on first container start (empty data volume). `01_buckets.sh` creates victron_medium/victron_hourly/victron_test; `02_tasks.sh` creates the 4 Flux downsampling tasks. Init does NOT re-run on container restarts.
-
-**Mosquitto passwd persistence:** eclipse-mosquitto declares `/mosquitto/config` as a Docker VOLUME so the passwd file survives container recreations. The entrypoint does `rm -f /mosquitto/config/passwd` before recreating it — this is intentional and prevents stale credentials from a previous run blocking startup.
-
-**Bash arithmetic gotcha in test scripts:** `((N++))` returns exit code 1 when N=0. Use `N=$((N+1))` in test scripts that use `set -e`.
-
-**Phase 3 decoder design:** `decoder.py` supports two MQTT payload formats on `victron/raw`:
-- Production: `{"mac": "...", "data": "hexbytes"}` — decrypted via `victron-ble` library using the device key from `config/devices.json`
-- Test: `{"mac": "...", "raw": {field: value}}` — pre-decoded values written directly to InfluxDB, no decryption needed
-
-The `raw` format is used in `decoder/fixtures/victron_sample.jsonl` so the isolated test works without real Victron hardware. The `data` format is what the ESP32 actually sends. To test real decryption requires real Victron devices with keys populated in `config/devices.json`.
-
-**victron-ble library usage:** `detect_device_type(raw_bytes)` takes manufacturer data bytes WITHOUT the Victron manufacturer ID prefix (0x02E1) — this matches what the ESP32 publishes (ESPHome's `get_manufacturer_datas()` strips the company identifier). Device class constructor takes the key as a hex string: `SolarCharger("aabb...").parse(raw_bytes)`.
-
-**Decoder retry buffer:** uses a `threading.Condition`-guarded `collections.deque(maxlen=500)` — deque auto-evicts oldest when full. A writer thread drains it with exponential-backoff retries [1, 2, 4, 8, 16s]. MQTT callbacks never block. This handles InfluxDB outages up to ~2.5 minutes without data loss.
-
-Each phase is test-isolated using a dedicated `victron_test` InfluxDB bucket, fixture replay, and the `docker-compose.test.yml` override.
+---
 
 ## InfluxDB Data Model
 
-- **Tags**: `device` (device ID), `label` (human name)
-- **Instantaneous fields**: `pv_power`, `pv_voltage`, `battery_voltage`, `charge_current`, `load_current`, `load_power`, `load_state`, `charge_state`, `error_code`, `temperature`
-- **Cumulative fields** (use MAX in aggregation): `yield_today`, `yield_total`
+**Tags on every point:** `site` (`home`, `garage`), `device` (device ID from sites.json), `label` (human name)
 
-## API Contract (summary)
+**`solar` measurement (Victron MPPT + Battery Sense):**
+- Instantaneous: `pv_power`, `pv_voltage`, `battery_voltage`, `charge_current`, `load_current`, `load_power`, `load_state`, `charge_state`, `error_code`, `temperature`
+- Cumulative (use MAX in aggregation): `yield_today`, `yield_total`
+
+**`battery` measurement (LiTime / EG4 BMS):**
+- `soc`, `soh`, `cycles`, `temperature`, `battery_voltage`, `battery_current`, `cell_min`, `cell_max`, `cell_avg`
+
+**4 buckets:** `victron` (30d raw), `victron_medium` (1yr 5-min), `victron_hourly` (∞ 1-hr), `victron_test` (24h)
+
+---
+
+## API Contract
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/v1/devices` | Device list with online state |
-| `GET /api/v1/current` | Latest reading per device |
-| `GET /api/v1/history?range=1h&device=...` | Bucket-stitched time series |
-| `GET /api/v1/daily?tz_offset_hours=N` | Daily yield totals, timezone-aware |
+| `GET /api/v1/sites` | Site list with ui config |
+| `GET /api/v1/devices?site=` | Device list, online state, per site |
+| `GET /api/v1/current?site=` | Latest reading per device |
+| `GET /api/v1/history?site=&device=&range=` | Bucket-stitched time series |
+| `GET /api/v1/daily?site=&tz_offset_hours=N` | Daily yield totals |
+| `GET /api/v1/battery?site=&device=` | Latest BMS snapshot (Phase 9+) |
 | `GET /health` | Liveness check |
+
+---
+
+## Key Files
+
+| Path | Purpose |
+|---|---|
+| `ble-bridge/ble_bridge.py` | Main bridge: fixture mode + production BLE scanner |
+| `ble-bridge/drivers/victron.py` | Victron BLE decode logic |
+| `ble-bridge/tests/test_decoder.py` | 16 unit tests (no InfluxDB needed) |
+| `ble-bridge/tests/test_fixture_replay.py` | 4 integration tests (requires InfluxDB) |
+| `ble-bridge/fixtures/sites_fixture.json` | Test sites.json: garage with 2 MPPTs |
+| `ble-bridge/fixtures/ble_packets.jsonl` | 4 pre-decoded test packets |
+| `decoder/decoder.py` | MQTT→InfluxDB for home ESP32 path |
+| `api/main.py` | FastAPI service |
+| `api/static/index.html` | Dashboard UI |
+| `docker-compose.yml` | Production stack |
+| `docker-compose.test.yml` | Test overrides (isolated bucket, fixture mounts) |
+| `test_phase8.sh` | Phase 8 test script — run on Linux server |
+| `config/sites.json` | Per-device MACs + keys (gitignored) |
+| `multi-site-design.md` | Authoritative design spec (v5.0) |
+
+---
+
+## Working Style
+
+**Never declare a phase complete unless every acceptance criterion in `multi-site-design.md` §8 is met** — including real-hardware steps where specified.
+
+**Never push to GitHub unless the user explicitly requests it.** Commit locally freely.
+
+**Never give the user a list of commands to run manually.** Everything goes into scripts. The user runs one thing and gets PASS/FAIL. When Linux server output is needed, ask for ONE command.
+
+**ALWAYS add automated tests with every code change.** Every commit backed by new or updated tests.
+
+---
+
+## Credentials
+
+**Production credentials:** generated by `setup.sh` (never hardcoded). In `.env` and `esp32/secrets.yaml` (both gitignored).
+
+**Test credentials:** hardcoded in `docker-compose.test.yml`:
+- InfluxDB test token: `test_influx_token_aabbccdd1122` (only valid when InfluxDB is freshly initialized via test overlay — NOT valid against production InfluxDB)
+- MQTT test pass: `test_decoder_pass`
+
+**Critical:** Integration tests against a production InfluxDB instance must use the real token from `.env`, NOT the hardcoded test token.
+
+---
+
+## Key Design Decisions
+
+**ESP32 BLE duty cycle is 50%** — time-slices the 2.4 GHz antenna. Do not change; continuous scan causes WiFi drops.
+
+**Server-side timestamps only** — decoder and ble-bridge timestamp on receipt. ESP32/BLE devices never provide timestamps.
+
+**Field-specific downsampling** — `yield_today` and `yield_total` use MAX; all others use MEAN. Mixing is a data integrity bug.
+
+**500-point ceiling** — API computes intervals to cap responses at 500 points per series.
+
+**BRIDGE_OFFLINE vs DEVICE_OFFLINE** — distinct states. Do not conflate.
+
+**OAuth at nginx** — `solar-api` has no auth layer. Security depends on nginx routing all traffic through oauth2-proxy.
+
+**ble-bridge uses bridge network + privileged + dbus mount** (NOT host networking) — keeps InfluxDB internal, connects via Docker network `http://influxdb:8086`. BlueZ access via `/var/run/dbus` socket mount.
+
+**InfluxWriter.write() silently catches exceptions** — write failures are invisible to callers. `run_fixture_mode` count return is a local counter, NOT confirmation of successful DB write. Any test that relies on this count to assert data was written is wrong.
+
+---
+
+## Known Gotchas
+
+**`docker compose run -e KEY=val` DOES override compose file env** — confirmed working; if 401 persists it is NOT a precedence bug.
+
+**`docker compose run --no-deps`** does not start dependent services but the container CAN still reach already-running services on the same Docker network.
+
+**influxdb-client `query_api().query()`** requires org to match exactly. Org name in production is `home`.
+
+**`((N++))` in bash with `set -e`** returns exit code 1 when N=0. Use `N=$((N+1))`.
+
+**Phase 3 decoder test format:** `{"mac": "...", "raw": {field: value}}` — pre-decoded, no decryption. Different from production `{"mac": "...", "data": "hexbytes"}` format.

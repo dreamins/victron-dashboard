@@ -36,14 +36,19 @@ if [ -z "$INFLUX_CONTAINER" ]; then
     echo "         Start the stack first: docker compose up -d influxdb"
 else
     echo "InfluxDB found: $INFLUX_CONTAINER"
-    echo "Running integration tests (fixture replay → InfluxDB)..."
-    $COMPOSE run --rm --no-deps \
-      -e INFLUX_URL=http://influxdb:8086 \
-      -e INFLUX_TOKEN=test_influx_token_aabbccdd1122 \
-      -e INFLUX_BUCKET=victron_test \
-      --network victron_default \
-      ble-bridge python -m pytest /app/tests/test_fixture_replay.py -v
-    pass "integration tests (fixture replay, site=garage tag, both devices, pv_power field)"
+    # Read the real token from .env (production InfluxDB is already initialised with it)
+    REAL_TOKEN=$(grep -E '^INFLUXDB_TOKEN=' .env 2>/dev/null | cut -d= -f2-)
+    if [ -z "$REAL_TOKEN" ]; then
+        echo "WARNING: INFLUXDB_TOKEN not found in .env — skipping integration tests"
+    else
+        echo "Running integration tests (fixture replay → InfluxDB)..."
+        $COMPOSE run --rm --no-deps \
+          -e INFLUX_URL=http://influxdb:8086 \
+          -e INFLUX_TOKEN="$REAL_TOKEN" \
+          -e INFLUX_BUCKET=victron_test \
+          ble-bridge python -m pytest /app/tests/test_fixture_replay.py -v
+        pass "integration tests (fixture replay, site=garage tag, both devices, pv_power field)"
+    fi
 fi
 
 # ── Cleanup: only the ble-bridge test container ───────────────────────────────
