@@ -80,6 +80,56 @@ class TestDecodeAdvertisement:
         assert not result
 
 
+class TestFixtureReplay:
+    def test_fixture_file_parsed(self, tmp_path):
+        import json
+        from ble_bridge import load_device_map, run_fixture_mode
+
+        sites = tmp_path / "sites.json"
+        sites.write_text(json.dumps({"sites": [{"id": "garage", "devices": [
+            {"id": "g1", "label": "G1", "mac": "AA:BB:CC:DD:EE:11", "key": "aabb"},
+            {"id": "g2", "label": "G2", "mac": "AA:BB:CC:DD:EE:22", "key": "ccdd"},
+        ]}]}))
+
+        packets = tmp_path / "packets.jsonl"
+        packets.write_text(
+            '{"mac": "AA:BB:CC:DD:EE:11", "raw": {"pv_power": 100.0, "battery_voltage": 13.2}}\n'
+            '{"mac": "AA:BB:CC:DD:EE:22", "raw": {"pv_power": 80.0, "battery_voltage": 13.1}}\n'
+        )
+
+        written = []
+
+        class MockWriter:
+            def write(self, point):
+                written.append(point)
+
+        dmap = load_device_map(str(sites))
+        count = run_fixture_mode(str(packets), dmap, MockWriter())
+        assert count == 2
+        assert len(written) == 2
+
+    def test_unknown_mac_skipped_gracefully(self, tmp_path):
+        import json
+        from ble_bridge import load_device_map, run_fixture_mode
+
+        sites = tmp_path / "sites.json"
+        sites.write_text(json.dumps({"sites": [{"id": "garage", "devices": []}]}))
+
+        packets = tmp_path / "packets.jsonl"
+        packets.write_text('{"mac": "FF:FF:FF:FF:FF:FF", "raw": {"pv_power": 50.0}}\n')
+
+        written = []
+
+        class MockWriter:
+            def write(self, point):
+                written.append(point)
+
+        dmap = load_device_map(str(sites))
+        count = run_fixture_mode(str(packets), dmap, MockWriter())
+        assert count == 1  # still written — device_id falls back to mac hex
+        assert len(written) == 1
+
+
 class TestLoadDeviceMap:
     def test_loads_garage_site(self, tmp_path):
         import json
