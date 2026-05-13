@@ -904,12 +904,20 @@ function grad(ctx2d,col){
   g.addColorStop(0,col+'55'); g.addColorStop(1,col+'00'); return g;
 }
 
+const UNIT_FMT={
+  ' V': v=>v.toFixed(2)+' V',
+  ' A': v=>v.toFixed(2)+' A',
+  '°C': v=>v.toFixed(1)+'°C',
+};
 function baseOpts(unit){
   const c=chartColors();
-  const tickFn=typeof unit==='function' ? unit : v=>`${v}${unit}`;
+  const tickFn=typeof unit==='function' ? unit : (UNIT_FMT[unit]||(v=>`${v}${unit}`));
   return{
     responsive:true, maintainAspectRatio:false,
-    plugins:{legend:{display:false}},
+    plugins:{
+      legend:{display:false},
+      tooltip:{callbacks:{label:ctx=>tickFn(ctx.parsed.y)}},
+    },
     scales:{
       x:{type:'time',grid:{color:c.grid},ticks:{color:c.tick,font:{size:11},maxTicksLimit:8}},
       y:{grid:{color:c.grid},ticks:{color:c.tick,font:{size:11},maxTicksLimit:6,callback:tickFn},border:{dash:[4,4]}}
@@ -948,7 +956,7 @@ async function drawMulti(cid,ids,field,start,unit){
   CH[cid]=new Chart(canvas,{
     type:'line', data:{datasets},
     options:{...baseOpts(unit),
-      plugins:{legend:{display:true,labels:{color:c.leg,font:{size:11},boxWidth:12}}}}
+      plugins:{...baseOpts(unit).plugins,legend:{display:true,labels:{color:c.leg,font:{size:11},boxWidth:12}}}}
   });
 }
 

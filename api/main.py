@@ -176,6 +176,30 @@ from(bucket: "{INFLUX_BUCKET}")
                 d["ts"] = d["ts"].isoformat()
         return result
 
+    def _actual_span_s(self, device: str, field: str, start_s: int,
+                       site: Optional[str]) -> Optional[int]:
+        """Return seconds from earliest data point to now, or None if no data.
+        Uses first() which hits the TSM index — cheap even on large buckets."""
+        segs = self._stitch(start_s)
+        bucket, t_start, _ = segs[0]
+        q = f"""
+from(bucket: "{bucket}")
+  |> range(start: {t_start})
+  |> filter(fn: (r) => r._measurement == "solar" and r.device == "{device}" and r._field == "{field}")
+  {_site_filter(site)}
+  |> first()
+  |> keep(columns: ["_time"])
+"""
+        try:
+            tables = self.query_api.query(q)
+            for table in tables:
+                for rec in table.records:
+                    span = int((datetime.now(timezone.utc) - rec.get_time()).total_seconds())
+                    return max(span, 1)
+        except Exception:
+            pass
+        return None
+
     def get_history(self, device: str, field: str, start_s: int, interval: str,
                     site: Optional[str] = None, max_points: int = 500) -> Dict[str, Any]:
         fn   = "max" if field in YIELD_FIELDS else "mean"
@@ -339,7 +363,14 @@ def history(
         range_s = _parse_s(start)
     except ValueError:
         raise HTTPException(400, "invalid start")
-    iv = interval if interval is not None else _auto_interval(range_s, max_points)
+    if interval is not None:
+        iv = interval
+    else:
+        # Use actual data span so short datasets get fine resolution even on
+        # long-range queries (e.g. "All" with only a week of data uses ~30s
+        # intervals instead of 12h).
+        span = repo._actual_span_s(device, field, range_s, site)
+        iv = _auto_interval(span if span else range_s, max_points)
     return repo.get_history(device, field, range_s, iv, site=site)
 
 
