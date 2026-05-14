@@ -34,6 +34,9 @@ docker compose run --rm --no-deps \
     python /app/identify_bms.py
 
 echo ""
+# Give BlueZ a moment to release the probe connection before ble-bridge connects.
+echo "Waiting for Bluetooth adapter to settle..."
+sleep 10
 echo "Restarting ble-bridge with updated configuration..."
 docker compose up -d --no-deps ble-bridge
 echo "ble-bridge restarted — connecting to identified BMS device(s)."

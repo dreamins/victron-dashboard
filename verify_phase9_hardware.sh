@@ -84,8 +84,8 @@ echo "Restarting solar-api (new /api/v1/battery endpoint)..."
 docker compose up -d --no-deps solar-api
 
 # ── Step 4: Wait for BMS first connection ─────────────────────────────────────
-echo "Waiting 30s for LiTime BMS connect + first data write..."
-sleep 30
+echo "Waiting 60s for LiTime BMS connect + first data write..."
+sleep 60
 
 # ── Step 5: Verify battery data in InfluxDB ───────────────────────────────────
 echo "Querying InfluxDB for battery measurement..."
