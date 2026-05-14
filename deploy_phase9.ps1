@@ -13,6 +13,7 @@ Write-Host "=== Phase 9 deploy: syncing files to $Server ===" -ForegroundColor C
 $files = @(
     "ble-bridge/ble_bridge.py",
     "ble-bridge/drivers/litime.py",
+    "ble-bridge/identify_bms.py",
     "ble-bridge/tests/test_decoder.py",
     "ble-bridge/tests/test_fixture_replay.py",
     "ble-bridge/fixtures/sites_fixture.json",
@@ -20,6 +21,7 @@ $files = @(
     "api/seed_test_data.py",
     "api/tests/test_api.py",
     "api/tests/sites_fixture.json",
+    "identify_bms.sh",
     "test_phase9.sh",
     "verify_phase9_hardware.sh"
 )

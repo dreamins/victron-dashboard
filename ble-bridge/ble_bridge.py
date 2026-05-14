@@ -235,6 +235,23 @@ async def run_production(device_map: Dict[str, Dict], writer: InfluxWriter):
     bms_devices     = [info for info in device_map.values()
                        if info.get("type") in _BMS_TYPES]
 
+    # Separate BMS devices into those with a saved MAC (ready) and those without.
+    ready_bms       = [info for info in bms_devices if info.get("mac")]
+    unconfigured    = [info for info in bms_devices if not info.get("mac")]
+
+    if len(unconfigured) > 1:
+        # Multiple unconfigured BMSs — auto-probe would be ambiguous.
+        for info in unconfigured:
+            log.error(
+                "[%s/%s] BMS has no MAC address — cannot start poller. "
+                "Run 'bash identify_bms.sh' to identify and configure each BMS.",
+                info["site_id"], info["device_id"],
+            )
+        bms_devices = ready_bms
+    elif len(unconfigured) == 1:
+        # Single unconfigured BMS — safe to auto-probe (probe_for_litime finds exactly one).
+        bms_devices = ready_bms + unconfigured
+
     tasks = []
     if victron_devices:
         tasks.append(asyncio.create_task(run_ble_scanner(victron_devices, writer)))

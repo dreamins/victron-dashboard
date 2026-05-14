@@ -198,6 +198,24 @@ class TestLoadDeviceMap:
         entries = [v for v in dmap.values() if v["device_id"] == "mppt_bad"]
         assert len(entries) == 0
 
+    def test_two_litime_bms_without_mac(self, tmp_path):
+        """Two BMS devices without MACs must both appear using distinct synthetic keys."""
+        import json
+        from ble_bridge import load_device_map
+        fixture = tmp_path / "sites.json"
+        fixture.write_text(json.dumps({
+            "sites": [{"id": "garage", "devices": [
+                {"id": "bms_a", "label": "Battery A", "type": "litime_bms"},
+                {"id": "bms_b", "label": "Battery B", "type": "litime_bms"},
+            ]}]
+        }))
+        dmap = load_device_map(str(fixture))
+        ids = {v["device_id"] for v in dmap.values()}
+        assert "bms_a" in ids
+        assert "bms_b" in ids
+        # Each gets its own synthetic key (no MAC collision)
+        assert len(dmap) == 2
+
 
 # ─── LiTime parser ────────────────────────────────────────────────────────────
 

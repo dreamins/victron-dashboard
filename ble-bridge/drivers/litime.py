@@ -130,28 +130,35 @@ async def _probe_device(address: str,
     return None
 
 
-async def probe_for_litime(scan_timeout: float = 10.0,
-                            probe_timeout: float = 2.5
-                            ) -> Optional[Tuple[str, str, str]]:
-    """Scan all nearby BLE devices and probe each one for a LiTime c_13 response.
+async def probe_all_litime(scan_timeout: float = 10.0,
+                           probe_timeout: float = 2.5
+                           ) -> list:
+    """Scan and probe every nearby BLE device; return ALL that respond to c_13.
 
-    No MAC address, service UUID, or device name is assumed — every reachable
-    device is tried until one answers the c_13 request with the correct anchor.
-
-    Returns (address, write_uuid, notify_uuid) for the first match, or None.
+    Returns a list of (address, write_uuid, notify_uuid) tuples — one per
+    LiTime BMS found.  Returns an empty list if none are found.
     """
     from bleak import BleakScanner
-    log.info("Probing for LiTime BMS (scan=%.0fs, probe=%.1fs/device)...",
+    log.info("Probing for LiTime BMS devices (scan=%.0fs, probe=%.1fs/device)...",
              scan_timeout, probe_timeout)
     devices = await BleakScanner.discover(timeout=scan_timeout)
     log.info("Found %d BLE device(s), probing each...", len(devices))
+    results = []
     for device in devices:
         log.debug("Probing %s (%s)", device.address, device.name or "?")
         result = await _probe_device(device.address, probe_timeout)
         if result:
-            return result
-    log.warning("No LiTime BMS found after probing %d device(s)", len(devices))
-    return None
+            results.append(result)
+    log.info("LiTime probe complete: %d BMS device(s) found", len(results))
+    return results
+
+
+async def probe_for_litime(scan_timeout: float = 10.0,
+                            probe_timeout: float = 2.5
+                            ) -> Optional[Tuple[str, str, str]]:
+    """Return the first LiTime BMS found, or None.  Convenience wrapper around probe_all_litime."""
+    results = await probe_all_litime(scan_timeout, probe_timeout)
+    return results[0] if results else None
 
 
 # ── BMS client ────────────────────────────────────────────────────────────────

@@ -55,16 +55,37 @@ EOF
 echo "Building ble-bridge and solar-api images..."
 docker compose build ble-bridge solar-api
 
-# ── Step 3: Restart ble-bridge and solar-api (no-deps: leave everything else running)
-echo "Restarting ble-bridge..."
-docker compose up -d --no-deps ble-bridge
+# ── Step 3: Identify BMS devices that still need a MAC assigned ───────────────
+NEEDS_ID=$(python3 - <<'EOF'
+import json
+with open('config/sites.json') as f:
+    config = json.load(f)
+needs = [
+    d['id']
+    for s in config.get('sites', [])
+    for d in s.get('devices', [])
+    if d.get('type') == 'litime_bms' and not d.get('mac')
+]
+print('\n'.join(needs))
+EOF
+)
+
+if [ -n "$NEEDS_ID" ]; then
+    echo "BMS device(s) need MAC identification: $NEEDS_ID"
+    echo "Running identification wizard (BMS must be powered on)..."
+    bash identify_bms.sh
+else
+    echo "All BMS devices already have MAC addresses — skipping identification."
+    echo "Restarting ble-bridge..."
+    docker compose up -d --no-deps ble-bridge
+fi
 
 echo "Restarting solar-api (new /api/v1/battery endpoint)..."
 docker compose up -d --no-deps solar-api
 
-# ── Step 4: Wait for LiTime first connection ──────────────────────────────────
-echo "Waiting 60s for LiTime BMS probe + connect + first data write..."
-sleep 60
+# ── Step 4: Wait for BMS first connection ─────────────────────────────────────
+echo "Waiting 30s for LiTime BMS connect + first data write..."
+sleep 30
 
 # ── Step 5: Verify battery data in InfluxDB ───────────────────────────────────
 echo "Querying InfluxDB for battery measurement..."
