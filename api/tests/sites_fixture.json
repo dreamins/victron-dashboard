@@ -31,6 +31,12 @@
           "type": "victron_battery_sense",
           "mac": "AA:BB:CC:DD:EE:03",
           "key": "ccddeeff00112233445566778899aabb"
+        },
+        {
+          "id": "test_bms",
+          "label": "Test LiTime",
+          "type": "litime_bms",
+          "mac": "AA:BB:CC:DD:EE:04"
         }
       ]
     }

@@ -154,3 +154,151 @@ class TestLoadDeviceMap:
         from ble_bridge import load_device_map
         result = load_device_map(str(tmp_path / "nonexistent.json"))
         assert result == {}
+
+    def test_mac_stored_in_entry(self, tmp_path):
+        import json
+        from ble_bridge import load_device_map
+        fixture = tmp_path / "sites.json"
+        fixture.write_text(json.dumps({
+            "sites": [{"id": "garage", "devices": [
+                {"id": "g1", "label": "G1", "mac": "AA:BB:CC:DD:EE:11",
+                 "key": "aabb", "type": "victron_mppt"}
+            ]}]
+        }))
+        dmap = load_device_map(str(fixture))
+        assert dmap["AA:BB:CC:DD:EE:11"]["mac"] == "AA:BB:CC:DD:EE:11"
+
+
+# ─── LiTime parser ────────────────────────────────────────────────────────────
+
+import struct as _struct
+
+
+def _make_litime_frame(voltage_mv=13200, current_ma=-2500, soc=85, soh=99,
+                       cycles=15, temp=22, cell_mv=3300, bad_checksum=False):
+    """Build a synthetic 105-byte c_13 response frame for testing."""
+    frame = bytearray(105)
+    frame[0] = 0x00
+    frame[1] = 0x00
+    # c_13 anchor at [3:7]
+    frame[3] = 0x01
+    frame[4] = 0x93
+    frame[5] = 0x55
+    frame[6] = 0xAA
+    _struct.pack_into('<H', frame, 12, voltage_mv)
+    for i in range(16):
+        _struct.pack_into('<H', frame, 16 + i * 2, cell_mv)
+    _struct.pack_into('<i', frame, 48, current_ma)
+    frame[52] = temp & 0xFF
+    _struct.pack_into('<H', frame, 90, soc)
+    _struct.pack_into('<H', frame, 92, soh)
+    _struct.pack_into('<H', frame, 96, cycles)
+    frame[104] = sum(frame[2:104]) & 0xFF
+    if bad_checksum:
+        frame[104] ^= 0xFF
+    return bytes(frame)
+
+
+class TestLiTimeParser:
+    def test_valid_frame_returns_dict(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame())
+        assert result is not None
+        assert isinstance(result, dict)
+
+    def test_voltage_correct(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(voltage_mv=13200))
+        assert abs(result["battery_voltage"] - 13.200) < 0.001
+
+    def test_current_inverted_positive_discharge(self):
+        # BMS reports positive = discharge; bridge inverts so positive = charging
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(current_ma=2500))   # 2.5A discharge
+        assert result["battery_current"] == pytest.approx(-2.5, abs=0.001)
+
+    def test_current_charging_is_positive(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(current_ma=-2500))  # 2.5A charging
+        assert result["battery_current"] == pytest.approx(2.5, abs=0.001)
+
+    def test_soc_correct(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(soc=85))
+        assert result["soc"] == 85.0
+
+    def test_soh_correct(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(soh=99))
+        assert result["soh"] == 99.0
+
+    def test_cycles_correct(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(cycles=15))
+        assert result["cycles"] == 15.0
+
+    def test_temperature_correct(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(temp=22))
+        assert result["temperature"] == 22.0
+
+    def test_temperature_negative(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(temp=-5))
+        assert result["temperature"] == -5.0
+
+    def test_cell_stats_uniform(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(cell_mv=3300))
+        assert result["cell_min"] == pytest.approx(3.3, abs=0.001)
+        assert result["cell_max"] == pytest.approx(3.3, abs=0.001)
+        assert result["cell_avg"] == pytest.approx(3.3, abs=0.001)
+
+    def test_bad_checksum_returns_none(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(bad_checksum=True))
+        assert result is None
+
+    def test_short_frame_returns_none(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(b"\x00" * 50)
+        assert result is None
+
+    def test_build_frame_c13_structure(self):
+        from drivers.litime import build_frame
+        frame = build_frame(0x13)
+        assert len(frame) == 8
+        assert frame[0] == 0x00
+        assert frame[1] == 0x00
+        assert frame[3] == 0x01
+        assert frame[4] == 0x13
+        assert frame[5] == 0x55
+        assert frame[6] == 0xAA
+        assert frame[7] == (0x04 + 0x13) & 0xFF
+
+    def test_notification_handler_split_frame(self):
+        """Frame delivered in two BLE notification chunks must be reassembled."""
+        from drivers.litime import LiTimeBMS
+        bms = LiTimeBMS("TEST:MAC")
+        received = []
+        bms.on_data_callback = received.append
+
+        full = _make_litime_frame()
+        mid = len(full) // 2
+        bms._notification_handler(None, full[:mid])
+        assert len(received) == 0, "Should not parse incomplete frame"
+        bms._notification_handler(None, full[mid:])
+        assert len(received) == 1, "Should parse after full frame received"
+        assert "soc" in received[0]
+
+    def test_notification_handler_two_consecutive_frames(self):
+        """Two back-to-back frames in one notification should both be parsed."""
+        from drivers.litime import LiTimeBMS
+        bms = LiTimeBMS("TEST:MAC")
+        received = []
+        bms.on_data_callback = received.append
+
+        frame1 = _make_litime_frame(soc=80)
+        frame2 = _make_litime_frame(soc=81)
+        bms._notification_handler(None, frame1 + frame2)
+        assert len(received) == 2

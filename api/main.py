@@ -149,6 +149,42 @@ from(bucket: "{INFLUX_BUCKET}")
         bridge_online = latest is not None and (now - latest).total_seconds() < BRIDGE_S
         return {"bridge_online": bridge_online, "devices": sorted(result, key=lambda d: d["id"])}
 
+    def get_battery(self, site: Optional[str] = None,
+                    device: Optional[str] = None) -> Dict[str, Any]:
+        dev_filter = (f'|> filter(fn: (r) => r.device == "{device}")'
+                      if device and _ID_RE.match(device) else "")
+        q = f"""
+from(bucket: "{INFLUX_BUCKET}")
+  |> range(start: -7d)
+  |> filter(fn: (r) => r._measurement == "battery")
+  {_site_filter(site)}
+  {dev_filter}
+  |> group(columns: ["device", "label", "_field"])
+  |> last()
+"""
+        tables = self.query_api.query(q)
+        result: Dict[str, Dict] = {}
+        for table in tables:
+            for rec in table.records:
+                dev = rec.values.get("device", "")
+                if not dev:
+                    continue
+                if dev not in result:
+                    result[dev] = {
+                        "device": dev,
+                        "label":  rec.values.get("label", dev),
+                        "ts":     None,
+                        "fields": {},
+                    }
+                result[dev]["fields"][rec.get_field()] = rec.get_value()
+                t = rec.get_time()
+                if result[dev]["ts"] is None or t > result[dev]["ts"]:
+                    result[dev]["ts"] = t
+        for d in result.values():
+            if d["ts"]:
+                d["ts"] = d["ts"].isoformat()
+        return result
+
     def get_current(self, site: Optional[str] = None) -> Dict[str, Any]:
         q = f"""
 from(bucket: "{INFLUX_BUCKET}")
@@ -372,6 +408,14 @@ def history(
         span = repo._actual_span_s(device, field, range_s, site)
         iv = _auto_interval(span if span else range_s, max_points)
     return repo.get_history(device, field, range_s, iv, site=site)
+
+
+@app.get("/api/v1/battery")
+def battery(
+    site:   Optional[str] = Query(default=None),
+    device: Optional[str] = Query(default=None),
+):
+    return repo.get_battery(site=site, device=device)
 
 
 @app.get("/api/v1/daily")

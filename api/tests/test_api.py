@@ -328,3 +328,39 @@ def test_current_site_filter():
     r = get("/api/v1/current", site="test")
     assert r.status_code == 200
     assert "test_mppt1" in r.json()
+
+
+# ─── Phase 9: /battery ────────────────────────────────────────────────────────
+
+def test_battery_returns_200():
+    r = get("/api/v1/battery")
+    assert r.status_code == 200
+
+
+def test_battery_structure():
+    r = get("/api/v1/battery")
+    for dev_data in r.json().values():
+        assert "device" in dev_data
+        assert "label" in dev_data
+        assert "fields" in dev_data
+        assert "ts" in dev_data
+
+
+def test_battery_has_soc_field():
+    r = get("/api/v1/battery", device="test_bms")
+    body = r.json()
+    assert "test_bms" in body, "test_bms device not found in battery response"
+    assert "soc" in body["test_bms"]["fields"]
+    assert 0 <= body["test_bms"]["fields"]["soc"] <= 100
+
+
+def test_battery_site_filter():
+    r = get("/api/v1/battery", site="test")
+    assert r.status_code == 200
+    assert "test_bms" in r.json()
+
+
+def test_battery_unknown_site_returns_empty():
+    r = get("/api/v1/battery", site="nonexistent_xyz")
+    assert r.status_code == 200
+    assert r.json() == {}

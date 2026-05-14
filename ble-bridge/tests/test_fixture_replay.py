@@ -90,3 +90,44 @@ from(bucket: "{INFLUX_BUCKET}")
     values = [r.get_value() for t in tables for r in t.records]
     assert len(values) > 0, "No pv_power field found"
     assert all(v >= 0 for v in values)
+
+
+# ─── Phase 9: battery measurement write ───────────────────────────────────────
+
+def test_battery_point_write_and_query():
+    """Write a synthetic battery point and verify it is queryable in InfluxDB."""
+    from datetime import datetime, timezone
+    from influxdb_client import InfluxDBClient, Point
+    from influxdb_client.client.write_api import SYNCHRONOUS
+
+    client    = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+    write_api = client.write_api(write_options=SYNCHRONOUS)
+
+    pt = (Point("battery")
+          .tag("site",   "garage")
+          .tag("device", "litime_test")
+          .tag("label",  "LiTime Test")
+          .field("soc",             85.0)
+          .field("soh",             99.0)
+          .field("battery_voltage", 13.2)
+          .field("battery_current", 2.5)
+          .field("cycles",          15.0)
+          .field("temperature",     22.0)
+          .field("cell_min",        3.295)
+          .field("cell_max",        3.305)
+          .field("cell_avg",        3.300)
+          .time(datetime.now(timezone.utc)))
+    write_api.write(bucket=INFLUX_BUCKET, record=pt)
+    time.sleep(1)
+
+    q = f"""
+from(bucket: "{INFLUX_BUCKET}")
+  |> range(start: -5m)
+  |> filter(fn: (r) => r._measurement == "battery" and r.site == "garage"
+                    and r.device == "litime_test" and r._field == "soc")
+  |> last()
+"""
+    tables = client.query_api().query(q)
+    values = [r.get_value() for t in tables for r in t.records]
+    assert len(values) > 0, "No battery SOC field found after write"
+    assert abs(values[0] - 85.0) < 1.0, f"SOC mismatch: expected ~85, got {values[0]}"

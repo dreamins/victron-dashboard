@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Linux BLE bridge: passively scans Victron BLE advertisements and writes to InfluxDB.
+Linux BLE bridge: passively scans Victron BLE advertisements and actively polls
+LiTime BMS devices, writing all data to InfluxDB.
 
 Production mode  — uses bleak + BlueZ to scan real BLE advertisements.
-Test/fixture mode — reads BLE_FIXTURE_FILE (JSONL, same format as decoder fixtures)
+Test/fixture mode — reads BLE_FIXTURE_FILE (JSONL, pre-decoded Victron packets)
                     and exits after the last line; no real BLE hardware required.
 """
 import asyncio
@@ -35,10 +36,12 @@ SITES_FILE       = os.environ.get("SITES_FILE", "/app/sites.json")
 BLE_FIXTURE_FILE = os.environ.get("BLE_FIXTURE_FILE", "")
 
 VICTRON_MFR_ID = 0x02E1
+_BMS_TYPES     = {"litime_bms"}
+_BMS_BACKOFF   = [5, 10, 20, 40]   # seconds; capped at last entry
 
 
 def load_device_map(sites_file: str) -> Dict[str, Dict[str, Any]]:
-    """Load sites.json and return {MAC_UPPER: {site_id, device_id, label, key}}."""
+    """Load sites.json and return {MAC_UPPER: {site_id, device_id, label, key, type, mac}}."""
     path = pathlib.Path(sites_file)
     if not path.exists():
         log.warning("Sites file not found: %s", sites_file)
@@ -58,6 +61,7 @@ def load_device_map(sites_file: str) -> Dict[str, Dict[str, Any]]:
                 "label":     dev.get("label", dev["id"]),
                 "key":       dev.get("key", ""),
                 "type":      dev.get("type", "unknown"),
+                "mac":       mac,
             }
     log.info("Loaded %d devices from %s", len(result), sites_file)
     return result
@@ -68,6 +72,20 @@ def _make_point(device_id: str, label: str, site_id: str,
     if not fields:
         return None
     p = (Point("solar")
+         .tag("device", device_id)
+         .tag("label", label)
+         .tag("site", site_id)
+         .time(ts))
+    for k, v in fields.items():
+        p = p.field(k, v)
+    return p
+
+
+def _make_battery_point(device_id: str, label: str, site_id: str,
+                        ts: datetime, fields: Dict[str, float]) -> Optional[Point]:
+    if not fields:
+        return None
+    p = (Point("battery")
          .tag("device", device_id)
          .tag("label", label)
          .tag("site", site_id)
@@ -152,10 +170,78 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter):
                          info["site_id"], info["device_id"], n,
                          " ".join(f"{k}={v:.1f}" for k, v in list(fields.items())[:3]))
 
-    log.info("BLE scan started — watching %d known devices", len(device_map))
+    log.info("BLE scan started — watching %d Victron devices", len(device_map))
     async with BleakScanner(detection_callback=_callback):
         while True:
             await asyncio.sleep(3600)
+
+
+async def run_bms_poller(info: Dict, writer: InfluxWriter):
+    """Connect to one LiTime BMS, poll every 5 s, reconnect with exponential backoff."""
+    from drivers.litime import LiTimeBMS
+
+    mac     = info["mac"]
+    site_id = info["site_id"]
+    dev_id  = info["device_id"]
+    label   = info["label"]
+    bms     = LiTimeBMS(mac)
+    backoff_idx = 0
+
+    def _on_data(fields: Dict[str, float]):
+        ts = datetime.now(timezone.utc)
+        pt = _make_battery_point(dev_id, label, site_id, ts, fields)
+        if pt:
+            writer.write(pt)
+            log.info("[%s/%s] battery SOC=%.0f%% V=%.2fV A=%.2fA",
+                     site_id, dev_id,
+                     fields.get("soc", 0),
+                     fields.get("battery_voltage", 0),
+                     fields.get("battery_current", 0))
+
+    bms.on_data_callback = _on_data
+
+    while True:
+        connected_ok = False
+        try:
+            await bms.connect()
+            connected_ok = True
+            backoff_idx = 0
+            while bms.is_connected:
+                await bms.poll()
+                await asyncio.sleep(5)
+            log.info("[%s/%s] BMS disconnected, reconnecting", site_id, dev_id)
+        except Exception as e:
+            delay = _BMS_BACKOFF[backoff_idx]
+            log.error("[%s/%s] BMS error: %s — reconnect in %ds", site_id, dev_id, e, delay)
+        finally:
+            await bms.disconnect()
+
+        delay = _BMS_BACKOFF[backoff_idx]
+        await asyncio.sleep(delay)
+        if not connected_ok:
+            backoff_idx = min(backoff_idx + 1, len(_BMS_BACKOFF) - 1)
+
+
+async def run_production(device_map: Dict[str, Dict], writer: InfluxWriter):
+    """Run passive Victron scanner and active BMS pollers concurrently."""
+    victron_devices = {mac: info for mac, info in device_map.items()
+                       if info.get("type") not in _BMS_TYPES}
+    bms_devices     = [info for info in device_map.values()
+                       if info.get("type") in _BMS_TYPES]
+
+    tasks = []
+    if victron_devices:
+        tasks.append(asyncio.create_task(run_ble_scanner(victron_devices, writer)))
+    for info in bms_devices:
+        tasks.append(asyncio.create_task(run_bms_poller(info, writer)))
+
+    if not tasks:
+        log.warning("No devices configured — nothing to do")
+        return
+
+    log.info("Production mode: %d Victron scanner(s), %d BMS poller(s)",
+             1 if victron_devices else 0, len(bms_devices))
+    await asyncio.gather(*tasks)
 
 
 def main():
@@ -168,8 +254,8 @@ def main():
         log.info("TEST MODE: replaying %s", BLE_FIXTURE_FILE)
         run_fixture_mode(BLE_FIXTURE_FILE, device_map, writer)
     else:
-        log.info("PRODUCTION MODE: starting BLE scanner")
-        asyncio.run(run_ble_scanner(device_map, writer))
+        log.info("PRODUCTION MODE: starting BLE scanner and BMS pollers")
+        asyncio.run(run_production(device_map, writer))
 
 
 if __name__ == "__main__":

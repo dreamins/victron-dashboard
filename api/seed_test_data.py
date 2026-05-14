@@ -132,8 +132,53 @@ def main():
             else:
                 raise
 
+    # ── Battery measurement (LiTime BMS) ─────────────────────────────────────
+    bms_points: list[Point] = []
+    t = start_time
+    while t <= end_time:
+        hour = t.hour + t.minute / 60.0
+        soc  = max(10.0, min(100.0, 91.0 - math.sin(hour / 24.0 * 2.0 * math.pi) * 15.0))
+        batt_v = 12.8 + (soc - 50.0) / 100.0
+        bms_points.append(
+            Point("battery")
+            .tag("device", "test_bms")
+            .tag("label",  "Test LiTime")
+            .tag("site",   SITE)
+            .field("soc",             float(soc))
+            .field("soh",             float(99.0))
+            .field("battery_voltage", float(batt_v))
+            .field("battery_current", float(5.0 * math.sin(hour / 12.0 * math.pi)))
+            .field("cycles",          float(15.0))
+            .field("temperature",     float(22.0 + math.sin(hour / 24.0 * 2 * math.pi) * 3.0))
+            .field("cell_min",        float(batt_v / 4.0 - 0.005))
+            .field("cell_max",        float(batt_v / 4.0 + 0.005))
+            .field("cell_avg",        float(batt_v / 4.0))
+            .time(t, "s")
+        )
+        if len(bms_points) >= 1000:
+            try:
+                write_api.write(bucket=INFLUX_BUCKET, record=bms_points)
+                written += len(bms_points)
+            except Exception as e:
+                if "outside retention policy" in str(e) or "422" in str(e):
+                    pass
+                else:
+                    raise
+            bms_points.clear()
+        t += step
+
+    if bms_points:
+        try:
+            write_api.write(bucket=INFLUX_BUCKET, record=bms_points)
+            written += len(bms_points)
+        except Exception as e:
+            if "outside retention policy" in str(e) or "422" in str(e):
+                pass
+            else:
+                raise
+
     client.close()
-    print(f"Seeded {written} points across {args.hours}h for {len(DEVICES)} devices")
+    print(f"Seeded {written} points across {args.hours}h for {len(DEVICES)} devices + test_bms")
     print(f"  bucket: {INFLUX_BUCKET}")
     print(f"  range: {start_time.isoformat()} → {end_time.isoformat()}")
 

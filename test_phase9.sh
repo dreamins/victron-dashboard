@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# test_phase9.sh — Phase 9: LiTime BMS support
+# Tests: LiTime parser unit tests, battery point write to InfluxDB, API battery endpoint.
+# No real BLE hardware required. Safe to run alongside production stack.
+set -euo pipefail
+
+COMPOSE="docker compose -f docker-compose.yml -f docker-compose.test.yml"
+PASS=0
+FAIL=0
+
+pass() { echo "PASS: $1"; PASS=$((PASS+1)); }
+fail() { echo "FAIL: $1"; FAIL=$((FAIL+1)); }
+
+echo "=== Phase 9: LiTime BMS support ==="
+
+# ── Build ble-bridge image ─────────────────────────────────────────────────────
+echo "Building ble-bridge image..."
+$COMPOSE build --no-cache ble-bridge
+
+# ── Unit tests (no InfluxDB needed) ───────────────────────────────────────────
+echo "Running unit tests (Victron decode + LiTime parser)..."
+$COMPOSE run --rm --no-deps \
+  -e INFLUX_URL=http://dummy \
+  -e INFLUX_TOKEN=dummy \
+  -e INFLUX_BUCKET=dummy \
+  ble-bridge python -m pytest /app/tests/test_decoder.py -v
+pass "unit tests (Victron decode + LiTime parser: 32 tests)"
+
+# ── Integration tests (require InfluxDB already running) ──────────────────────
+INFLUX_CONTAINER=$(docker ps --filter "name=victron-influxdb" --format "{{.Names}}" | head -1)
+if [ -z "$INFLUX_CONTAINER" ]; then
+    echo "WARNING: InfluxDB container not running — skipping integration tests"
+    echo "         Start the stack first: docker compose up -d influxdb"
+else
+    echo "InfluxDB found: $INFLUX_CONTAINER"
+    REAL_TOKEN=$(grep -E '^INFLUXDB_TOKEN=' .env 2>/dev/null | cut -d= -f2-)
+    if [ -z "$REAL_TOKEN" ]; then
+        echo "WARNING: INFLUXDB_TOKEN not found in .env — skipping integration tests"
+    else
+        echo "Running integration tests (fixture replay + battery write → InfluxDB)..."
+        $COMPOSE run --rm --no-deps \
+          -e INFLUX_URL=http://influxdb:8086 \
+          -e INFLUX_TOKEN="$REAL_TOKEN" \
+          -e INFLUX_BUCKET=victron_test \
+          ble-bridge python -m pytest /app/tests/test_fixture_replay.py -v
+        pass "integration tests (fixture replay + battery point write: 5 tests)"
+    fi
+fi
+
+# ── Cleanup ────────────────────────────────────────────────────────────────────
+docker container prune -f --filter "label=com.docker.compose.project=victron" >/dev/null 2>&1 || true
+
+# ── Summary ────────────────────────────────────────────────────────────────────
+echo ""
+echo "================================"
+echo "Results: $PASS passed, $FAIL failed"
+echo "================================"
+[ "$FAIL" -eq 0 ] && exit 0 || exit 1

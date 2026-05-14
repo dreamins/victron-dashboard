@@ -24,6 +24,12 @@
           "type": "victron_mppt",
           "mac": "AA:BB:CC:DD:EE:22",
           "key": "aabbccddeeff00112233445566778822"
+        },
+        {
+          "id": "litime_main",
+          "label": "LiTime Battery",
+          "type": "litime_bms",
+          "mac": "AA:BB:CC:DD:EE:33"
         }
       ]
     }
