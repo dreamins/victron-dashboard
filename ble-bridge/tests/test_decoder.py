@@ -137,11 +137,11 @@ class TestPersistMac:
             {"id": "litime_main", "label": "LiTime Battery", "type": "litime_bms"}
         ]}]}))
 
-        _persist_mac(str(sites), "garage", "litime_main", "XX:XX:XX:XX:XX:XX")
+        _persist_mac(str(sites), "garage", "litime_main", "AA:BB:CC:DD:EE:75")
 
         data = json.loads(sites.read_text())
         dev = data["sites"][0]["devices"][0]
-        assert dev["mac"] == "XX:XX:XX:XX:XX:XX"
+        assert dev["mac"] == "AA:BB:CC:DD:EE:75"
 
     def test_missing_file_does_not_raise(self, tmp_path):
         from ble_bridge import _persist_mac
