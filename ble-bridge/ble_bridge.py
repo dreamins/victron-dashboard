@@ -248,8 +248,12 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
 
     bms.on_data_callback = _on_data
 
-    # Give the scanner a moment to start before we stop it for the first connect.
-    await asyncio.sleep(3)
+    # Wait for the scanner to discover nearby devices and populate BlueZ's cache.
+    # Bleak needs the device in the cache before connect(); 20 s is conservative —
+    # the BMS typically appears within 5–10 s of scanning.
+    if mac:
+        log.info("[%s/%s] waiting 20 s for BLE scanner to discover BMS", site_id, dev_id)
+        await asyncio.sleep(20)
 
     while True:
         connected_ok = False
