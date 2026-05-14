@@ -151,6 +151,29 @@ def run_fixture_mode(fixture_file: str, device_map: Dict[str, Dict], writer: Inf
 # org.bluez.Error.InProgress (BlueZ cannot connect while discovery is active).
 _victron_scanner = None
 
+# MAC → Event: fires when the passive scanner first sees the MAC advertising.
+# BMS pollers register here so connect() only runs after the device is in BlueZ's cache.
+_bms_seen_events: Dict[str, asyncio.Event] = {}
+
+
+async def _wait_for_bms_in_scan(mac: str, timeout: float = 300.0) -> bool:
+    """Block until the running scanner spots mac, or until timeout seconds.
+
+    Returns True if the MAC was seen, False on timeout.  No-ops and returns
+    False immediately if no scanner is running (BMS-only setup).
+    """
+    if _victron_scanner is None:
+        return False
+    ev = asyncio.Event()
+    _bms_seen_events[mac] = ev
+    try:
+        await asyncio.wait_for(ev.wait(), timeout=timeout)
+        return True
+    except asyncio.TimeoutError:
+        return False
+    finally:
+        _bms_seen_events.pop(mac, None)
+
 
 async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter):
     """Production mode: scan BLE indefinitely, decode Victron advertisements."""
@@ -160,9 +183,14 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter):
     seen: Dict[str, int] = {}
 
     def _callback(device, adv_data):
+        mac = device.address.upper()
+
+        # Notify any BMS pollers waiting for this MAC to appear in scan.
+        if mac in _bms_seen_events:
+            _bms_seen_events[mac].set()
+
         if VICTRON_MFR_ID not in adv_data.manufacturer_data:
             return
-        mac  = device.address.upper()
         info = device_map.get(mac)
         if not info:
             log.debug("Unknown Victron MAC: %s", mac)
@@ -248,14 +276,20 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
 
     bms.on_data_callback = _on_data
 
-    # Wait for the scanner to discover nearby devices and populate BlueZ's cache.
-    # Bleak needs the device in the cache before connect(); 20 s is conservative —
-    # the BMS typically appears within 5–10 s of scanning.
-    if mac:
-        log.info("[%s/%s] waiting 20 s for BLE scanner to discover BMS", site_id, dev_id)
-        await asyncio.sleep(20)
-
     while True:
+        # Wait until the passive scanner actually sees the BMS advertising.
+        # This guarantees BlueZ has a device object for the MAC before we call
+        # Device.Connect() — the same approach BLE apps use: scan first, then connect.
+        if mac:
+            log.info("[%s/%s] waiting for BMS to appear in BLE scan...", site_id, dev_id)
+            seen = await _wait_for_bms_in_scan(mac, timeout=300.0)
+            if seen:
+                log.info("[%s/%s] BMS detected, connecting now", site_id, dev_id)
+            else:
+                log.warning("[%s/%s] BMS not seen after 5 min — may be off or connected "
+                            "to another device; will keep waiting", site_id, dev_id)
+                continue  # loop back and wait again rather than failing immediately
+
         connected_ok = False
         scan_was_running = False
         try:
@@ -277,13 +311,8 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
                 await asyncio.sleep(5)
             log.info("[%s/%s] BMS disconnected, reconnecting", site_id, dev_id)
         except Exception as e:
-            msg = str(e)
-            if "not found" in msg.lower():
-                log.warning("[%s/%s] BMS not advertising (may be connected to another device) "
-                            "— will retry in %ds", site_id, dev_id, _BMS_BACKOFF[backoff_idx])
-            else:
-                log.error("[%s/%s] BMS error: %s — reconnect in %ds",
-                          site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
+            log.error("[%s/%s] BMS error: %s — reconnect in %ds",
+                      site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
         finally:
             if scan_was_running:
                 await _scanner_start()

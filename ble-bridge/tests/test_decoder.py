@@ -80,6 +80,53 @@ class TestDecodeAdvertisement:
         assert not result
 
 
+class TestBmsScanWait:
+    """_wait_for_bms_in_scan resolves immediately when scanner fires the event."""
+
+    def test_fires_when_event_set(self):
+        import asyncio
+        import ble_bridge
+
+        async def _run():
+            mac = "AA:BB:CC:DD:EE:FF"
+            ble_bridge._victron_scanner = object()
+
+            async def _trigger():
+                await asyncio.sleep(0.05)
+                # Fire the event that _wait_for_bms_in_scan registered
+                if mac in ble_bridge._bms_seen_events:
+                    ble_bridge._bms_seen_events[mac].set()
+
+            asyncio.create_task(_trigger())
+            seen = await ble_bridge._wait_for_bms_in_scan(mac, timeout=2.0)
+            ble_bridge._victron_scanner = None
+            return seen
+
+        assert asyncio.run(_run()) is True
+
+    def test_times_out_when_never_seen(self):
+        import asyncio
+        import ble_bridge
+
+        async def _run():
+            ble_bridge._victron_scanner = object()
+            seen = await ble_bridge._wait_for_bms_in_scan("00:11:22:33:44:55", timeout=0.1)
+            ble_bridge._victron_scanner = None
+            return seen
+
+        assert asyncio.run(_run()) is False
+
+    def test_returns_false_without_scanner(self):
+        import asyncio
+        import ble_bridge
+
+        async def _run():
+            ble_bridge._victron_scanner = None
+            return await ble_bridge._wait_for_bms_in_scan("AA:BB:CC:DD:EE:FF", timeout=5.0)
+
+        assert asyncio.run(_run()) is False
+
+
 class TestFixtureReplay:
     def test_fixture_file_parsed(self, tmp_path):
         import json
