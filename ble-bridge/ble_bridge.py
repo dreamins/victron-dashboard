@@ -206,26 +206,44 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
 
     bms.on_data_callback = _on_data
 
+    # Wait for the passive BLE scanner to start and populate BlueZ's device cache.
+    # BleakClient.connect() needs the device in the cache; if it's not there yet it
+    # calls StartDiscovery, which conflicts with the already-running scanner and
+    # returns org.bluez.Error.InProgress.  15 s is conservative — the BMS typically
+    # appears in the cache within 5–10 s of scanning starting.
+    if mac:
+        log.info("[%s/%s] waiting 15 s for BLE scanner to populate device cache", site_id, dev_id)
+        await asyncio.sleep(15)
+
     while True:
-        connected_ok = False
+        connected_ok  = False
+        in_progress   = False
         try:
             await bms.connect()
             connected_ok = True
-            backoff_idx = 0
+            backoff_idx  = 0
             while bms.is_connected:
                 await bms.poll()
                 await asyncio.sleep(5)
             log.info("[%s/%s] BMS disconnected, reconnecting", site_id, dev_id)
         except Exception as e:
-            delay = _BMS_BACKOFF[backoff_idx]
-            log.error("[%s/%s] BMS error: %s — reconnect in %ds", site_id, dev_id, e, delay)
+            if "InProgress" in str(e):
+                in_progress = True
+                log.warning("[%s/%s] BMS InProgress — scanner still discovering, retry in 5s",
+                            site_id, dev_id)
+            else:
+                log.error("[%s/%s] BMS error: %s — reconnect in %ds",
+                          site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
         finally:
             await bms.disconnect()
 
-        delay = _BMS_BACKOFF[backoff_idx]
-        await asyncio.sleep(delay)
-        if not connected_ok:
-            backoff_idx = min(backoff_idx + 1, len(_BMS_BACKOFF) - 1)
+        if in_progress:
+            await asyncio.sleep(5)
+        else:
+            delay = _BMS_BACKOFF[backoff_idx]
+            await asyncio.sleep(delay)
+            if not connected_ok:
+                backoff_idx = min(backoff_idx + 1, len(_BMS_BACKOFF) - 1)
 
 
 async def run_production(device_map: Dict[str, Dict], writer: InfluxWriter):
