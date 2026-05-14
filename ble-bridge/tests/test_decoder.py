@@ -127,6 +127,43 @@ class TestBmsScanWait:
         assert asyncio.run(_run()) is False
 
 
+class TestPersistMac:
+    def test_writes_mac_to_sites_json(self, tmp_path):
+        import json
+        from ble_bridge import _persist_mac
+
+        sites = tmp_path / "sites.json"
+        sites.write_text(json.dumps({"sites": [{"id": "garage", "devices": [
+            {"id": "litime_main", "label": "LiTime Battery", "type": "litime_bms"}
+        ]}]}))
+
+        _persist_mac(str(sites), "garage", "litime_main", "XX:XX:XX:XX:XX:XX")
+
+        data = json.loads(sites.read_text())
+        dev = data["sites"][0]["devices"][0]
+        assert dev["mac"] == "XX:XX:XX:XX:XX:XX"
+
+    def test_missing_file_does_not_raise(self, tmp_path):
+        from ble_bridge import _persist_mac
+        # Should log an error but not crash
+        _persist_mac(str(tmp_path / "nonexistent.json"), "garage", "litime_main", "AA:BB:CC:DD:EE:FF")
+
+    def test_wrong_device_id_leaves_file_unchanged(self, tmp_path):
+        import json
+        from ble_bridge import _persist_mac
+
+        original = {"sites": [{"id": "garage", "devices": [
+            {"id": "litime_main", "label": "LiTime Battery", "type": "litime_bms"}
+        ]}]}
+        sites = tmp_path / "sites.json"
+        sites.write_text(json.dumps(original))
+
+        _persist_mac(str(sites), "garage", "wrong_id", "AA:BB:CC:DD:EE:FF")
+
+        data = json.loads(sites.read_text())
+        assert "mac" not in data["sites"][0]["devices"][0]
+
+
 class TestFixtureReplay:
     def test_fixture_file_parsed(self, tmp_path):
         import json

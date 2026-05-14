@@ -40,6 +40,25 @@ _BMS_TYPES     = {"litime_bms"}
 _BMS_BACKOFF   = [5, 10, 20, 40]   # seconds; capped at last entry
 
 
+def _persist_mac(sites_file: str, site_id: str, device_id: str, mac: str):
+    """Write a discovered BMS MAC back to sites.json so it survives restarts."""
+    path = pathlib.Path(sites_file)
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        for site in data.get("sites", []):
+            if site["id"] != site_id:
+                continue
+            for dev in site.get("devices", []):
+                if dev["id"] == device_id:
+                    dev["mac"] = mac
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+        log.info("[%s/%s] discovered MAC %s saved to %s", site_id, device_id, mac, sites_file)
+    except Exception as e:
+        log.error("[%s/%s] failed to save discovered MAC: %s", site_id, device_id, e)
+
+
 def load_device_map(sites_file: str) -> Dict[str, Dict[str, Any]]:
     """Load sites.json and return {MAC_UPPER: {site_id, device_id, label, key, type, mac}}."""
     path = pathlib.Path(sites_file)
@@ -301,6 +320,11 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
             await bms.connect()
             connected_ok = True
             backoff_idx  = 0
+
+            # Auto-probe discovered the MAC — persist it to config immediately.
+            if not mac and bms.address:
+                mac = bms.address
+                _persist_mac(SITES_FILE, site_id, dev_id, mac)
 
             # Scanner can run concurrently once the BMS connection is established.
             await _scanner_start()
