@@ -52,15 +52,21 @@ def load_device_map(sites_file: str) -> Dict[str, Dict[str, Any]]:
     for site in data.get("sites", []):
         site_id = site["id"]
         for dev in site.get("devices", []):
-            mac = dev.get("mac", "").upper()
-            if not mac:
+            mac      = dev.get("mac", "").upper()
+            dev_type = dev.get("type", "unknown")
+            # Victron devices require a MAC (matched from passive BLE advertisements).
+            # BMS devices can omit it — they will auto-probe on first connect.
+            if not mac and dev_type not in _BMS_TYPES:
+                log.warning("Skipping %s/%s: no MAC and type is not a BMS",
+                            site_id, dev.get("id", "?"))
                 continue
-            result[mac] = {
+            key = mac if mac else f"_{site_id}_{dev['id']}"
+            result[key] = {
                 "site_id":   site_id,
                 "device_id": dev["id"],
                 "label":     dev.get("label", dev["id"]),
                 "key":       dev.get("key", ""),
-                "type":      dev.get("type", "unknown"),
+                "type":      dev_type,
                 "mac":       mac,
             }
     log.info("Loaded %d devices from %s", len(result), sites_file)

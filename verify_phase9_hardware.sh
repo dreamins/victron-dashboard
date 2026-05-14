@@ -4,7 +4,6 @@
 # Run on Linux server: cd ~/victron-dashboard && bash verify_phase9_hardware.sh
 set -euo pipefail
 
-LITIME_MAC="XX:XX:XX:XX:XX:XX"
 PASS=0
 FAIL=0
 
@@ -32,8 +31,7 @@ if any(d['id'] == 'litime_main' for d in garage['devices']):
 garage['devices'].append({
     "id":    "litime_main",
     "label": "LiTime Battery",
-    "type":  "litime_bms",
-    "mac":   "XX:XX:XX:XX:XX:XX"
+    "type":  "litime_bms"
 })
 with open('config/sites.json', 'w') as f:
     json.dump(config, f, indent=2)
@@ -52,8 +50,8 @@ echo "Restarting solar-api (new /api/v1/battery endpoint)..."
 docker compose up -d --no-deps solar-api
 
 # ── Step 4: Wait for LiTime first connection ──────────────────────────────────
-echo "Waiting 35s for LiTime BMS to connect and write first data..."
-sleep 35
+echo "Waiting 60s for LiTime BMS probe + connect + first data write..."
+sleep 60
 
 # ── Step 5: Verify battery data in InfluxDB ───────────────────────────────────
 echo "Querying InfluxDB for battery measurement..."

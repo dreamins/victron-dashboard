@@ -168,6 +168,36 @@ class TestLoadDeviceMap:
         dmap = load_device_map(str(fixture))
         assert dmap["AA:BB:CC:DD:EE:11"]["mac"] == "AA:BB:CC:DD:EE:11"
 
+    def test_litime_bms_no_mac_included(self, tmp_path):
+        """litime_bms without a mac must still appear in device map (auto-probe path)."""
+        import json
+        from ble_bridge import load_device_map
+        fixture = tmp_path / "sites.json"
+        fixture.write_text(json.dumps({
+            "sites": [{"id": "garage", "devices": [
+                {"id": "litime_main", "label": "LiTime Battery", "type": "litime_bms"}
+            ]}]
+        }))
+        dmap = load_device_map(str(fixture))
+        entries = [v for v in dmap.values() if v["device_id"] == "litime_main"]
+        assert len(entries) == 1
+        assert entries[0]["mac"] == ""
+        assert entries[0]["type"] == "litime_bms"
+
+    def test_victron_no_mac_excluded(self, tmp_path):
+        """Victron devices without a mac must be skipped — they require MAC for BLE matching."""
+        import json
+        from ble_bridge import load_device_map
+        fixture = tmp_path / "sites.json"
+        fixture.write_text(json.dumps({
+            "sites": [{"id": "garage", "devices": [
+                {"id": "mppt_bad", "label": "MPPT", "type": "victron_mppt"}
+            ]}]
+        }))
+        dmap = load_device_map(str(fixture))
+        entries = [v for v in dmap.values() if v["device_id"] == "mppt_bad"]
+        assert len(entries) == 0
+
 
 # ─── LiTime parser ────────────────────────────────────────────────────────────
 

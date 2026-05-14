@@ -1,12 +1,14 @@
-"""LiTime BMS active BLE driver: connect, poll c_13 every 5s, parse 105-byte response."""
+"""LiTime BMS active BLE driver: auto-probe, connect, poll c_13 every 5s, parse 105-byte response.
+
+Discovery is pure probe — no MAC, no service UUID assumed.  Every nearby BLE device is
+connected and every writable+notifiable characteristic is tried.  The first device/char
+pair that returns a response containing the c_13 anchor bytes is identified as the BMS.
+"""
 import asyncio
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 log = logging.getLogger(__name__)
-
-CHAR_WRITE  = "0000ffe2-0000-1000-8000-00805f9b34fb"
-CHAR_NOTIFY = "0000ffe1-0000-1000-8000-00805f9b34fb"
 
 # c_13 response anchor at frame bytes [3:7]: type(01) + tag-with-response-bit(93) + magic(55 AA)
 _C13_ANCHOR = bytes([0x01, 0x93, 0x55, 0xAA])
@@ -66,16 +68,111 @@ def parse_litime_frame(data: bytes) -> Optional[Dict[str, float]]:
     }
 
 
-class LiTimeBMS:
-    """Active BLE client for the LiTime BMS. Connect, then poll() every 5 s."""
+# ── BLE probe ─────────────────────────────────────────────────────────────────
 
-    def __init__(self, address: str):
+async def _try_characteristic_pair(client, write_uuid: str, notify_uuid: str,
+                                    timeout: float) -> bool:
+    """Send c_13 on write_uuid and wait up to timeout seconds for the c_13 anchor
+    to appear in notifications on notify_uuid.  Returns True if found."""
+    received = bytearray()
+    found    = asyncio.Event()
+
+    def _handler(sender, data: bytes):
+        received.extend(data)
+        if _C13_ANCHOR in received:
+            found.set()
+
+    try:
+        await client.start_notify(notify_uuid, _handler)
+        try:
+            # write-without-response is more permissive during probing
+            await client.write_gatt_char(write_uuid, build_frame(0x13), response=False)
+            await asyncio.wait_for(found.wait(), timeout=timeout)
+            return True
+        except (asyncio.TimeoutError, Exception):
+            return False
+        finally:
+            try:
+                await client.stop_notify(notify_uuid)
+            except Exception:
+                pass
+    except Exception:
+        return False
+
+
+async def _probe_device(address: str,
+                        probe_timeout: float) -> Optional[Tuple[str, str, str]]:
+    """Connect to one BLE address and probe all writable+notifiable char pairs.
+
+    Returns (address, write_uuid, notify_uuid) on the first pair that responds
+    to the c_13 probe, or None if the device is not a LiTime BMS.
+    """
+    from bleak import BleakClient
+    try:
+        async with BleakClient(address, timeout=10.0) as client:
+            if not client.is_connected:
+                return None
+            for service in client.services:
+                notifiable = [c.uuid for c in service.characteristics
+                              if "notify" in c.properties]
+                writable   = [c.uuid for c in service.characteristics
+                              if "write" in c.properties
+                              or "write-without-response" in c.properties]
+                for w_uuid in writable:
+                    for n_uuid in notifiable:
+                        if await _try_characteristic_pair(client, w_uuid, n_uuid,
+                                                          probe_timeout):
+                            log.info("Probe identified LiTime BMS: %s  write=%s  notify=%s",
+                                     address, w_uuid, n_uuid)
+                            return (address, w_uuid, n_uuid)
+    except Exception as exc:
+        log.debug("Probe %s: %s", address, exc)
+    return None
+
+
+async def probe_for_litime(scan_timeout: float = 10.0,
+                            probe_timeout: float = 2.5
+                            ) -> Optional[Tuple[str, str, str]]:
+    """Scan all nearby BLE devices and probe each one for a LiTime c_13 response.
+
+    No MAC address, service UUID, or device name is assumed — every reachable
+    device is tried until one answers the c_13 request with the correct anchor.
+
+    Returns (address, write_uuid, notify_uuid) for the first match, or None.
+    """
+    from bleak import BleakScanner
+    log.info("Probing for LiTime BMS (scan=%.0fs, probe=%.1fs/device)...",
+             scan_timeout, probe_timeout)
+    devices = await BleakScanner.discover(timeout=scan_timeout)
+    log.info("Found %d BLE device(s), probing each...", len(devices))
+    for device in devices:
+        log.debug("Probing %s (%s)", device.address, device.name or "?")
+        result = await _probe_device(device.address, probe_timeout)
+        if result:
+            return result
+    log.warning("No LiTime BMS found after probing %d device(s)", len(devices))
+    return None
+
+
+# ── BMS client ────────────────────────────────────────────────────────────────
+
+class LiTimeBMS:
+    """Active BLE client for the LiTime BMS.
+
+    Pass address="" to trigger auto-discovery on the first connect() call.
+    The discovered address and characteristic UUIDs are cached for reconnects.
+    """
+
+    def __init__(self, address: str = ""):
         self.address          = address
         self.on_data_callback = None   # callable(dict[str, float]) or None
         self.is_connected     = False
         self._client          = None
         self._buffer          = bytearray()
         self._lock            = asyncio.Lock()
+        # Set during probe (or kept as None to re-probe on connection failure)
+        self._write_uuid: Optional[str]  = None
+        self._notify_uuid: Optional[str] = None
 
     def _on_disconnect(self, client):
         self.is_connected = False
@@ -83,6 +180,14 @@ class LiTimeBMS:
 
     async def connect(self):
         from bleak import BleakClient
+
+        # Auto-discover if we have no address yet (or lost it and need re-probe)
+        if not self.address:
+            result = await probe_for_litime()
+            if result is None:
+                raise RuntimeError("No LiTime BMS found during BLE probe")
+            self.address, self._write_uuid, self._notify_uuid = result
+
         self._client = BleakClient(
             self.address,
             timeout=20.0,
@@ -91,14 +196,18 @@ class LiTimeBMS:
         await self._client.connect()
         self.is_connected = True
         self._buffer.clear()
-        await self._client.start_notify(CHAR_NOTIFY, self._notification_handler)
+
+        notify_uuid = self._notify_uuid or _fallback_notify(self._client)
+        await self._client.start_notify(notify_uuid, self._notification_handler)
+        self._notify_uuid = notify_uuid
         log.info("LiTime %s connected", self.address)
 
     async def disconnect(self):
         if self._client:
             if self.is_connected:
                 try:
-                    await self._client.stop_notify(CHAR_NOTIFY)
+                    if self._notify_uuid:
+                        await self._client.stop_notify(self._notify_uuid)
                     await self._client.disconnect()
                 except Exception:
                     pass
@@ -109,8 +218,9 @@ class LiTimeBMS:
         """Send a c_13 data request."""
         if not (self._client and self.is_connected):
             return
+        write_uuid = self._write_uuid or _fallback_write(self._client)
         async with self._lock:
-            await self._client.write_gatt_char(CHAR_WRITE, build_frame(0x13), response=True)
+            await self._client.write_gatt_char(write_uuid, build_frame(0x13), response=True)
 
     def _notification_handler(self, sender, data: bytes):
         self._buffer.extend(data)
@@ -144,5 +254,23 @@ class LiTimeBMS:
             if self.on_data_callback:
                 try:
                     self.on_data_callback(fields)
-                except Exception as e:
-                    log.error("LiTime callback error: %s", e)
+                except Exception as exc:
+                    log.error("LiTime callback error: %s", exc)
+
+
+def _fallback_write(client) -> str:
+    """Return first writable characteristic UUID — used when probe didn't run."""
+    for svc in client.services:
+        for c in svc.characteristics:
+            if "write" in c.properties or "write-without-response" in c.properties:
+                return c.uuid
+    raise RuntimeError("No writable characteristic found on connected BMS")
+
+
+def _fallback_notify(client) -> str:
+    """Return first notifiable characteristic UUID — used when probe didn't run."""
+    for svc in client.services:
+        for c in svc.characteristics:
+            if "notify" in c.properties:
+                return c.uuid
+    raise RuntimeError("No notifiable characteristic found on connected BMS")
