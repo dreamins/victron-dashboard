@@ -211,13 +211,14 @@ class LiTimeBMS:
 
     async def disconnect(self):
         if self._client:
-            if self.is_connected:
-                try:
-                    if self._notify_uuid:
-                        await self._client.stop_notify(self._notify_uuid)
-                    await self._client.disconnect()
-                except Exception:
-                    pass
+            try:
+                if self.is_connected and self._notify_uuid:
+                    await self._client.stop_notify(self._notify_uuid)
+                # Always disconnect — cancels any pending Device.Connect() in BlueZ
+                # so the next connect() call doesn't get org.bluez.Error.InProgress.
+                await self._client.disconnect()
+            except Exception:
+                pass
             self.is_connected = False
             self._client = None
 
