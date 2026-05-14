@@ -22,7 +22,20 @@ with open('config/sites.json') as f:
 
 garage = next((s for s in config['sites'] if s['id'] == 'garage'), None)
 if garage is None:
-    sys.exit("ERROR: no 'garage' site in sites.json")
+    garage = {
+        "id": "garage",
+        "label": "Garage Solar",
+        "tz_offset_hours": 0,
+        "bridge": "ble",
+        "ui": {
+            "show_loads": False,
+            "battery_display": "bms",
+            "mppt_count": 2
+        },
+        "devices": []
+    }
+    config['sites'].append(garage)
+    print("  'garage' site created in config/sites.json")
 
 if any(d['id'] == 'litime_main' for d in garage['devices']):
     print("  litime_main already present — no change needed")
