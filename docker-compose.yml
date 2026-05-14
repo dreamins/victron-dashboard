@@ -79,7 +79,7 @@ services:
     depends_on:
       - influxdb
     volumes:
-      - /var/run/dbus:/var/run/dbus:ro
+      - /var/run/dbus:/var/run/dbus
       - ./config/sites.json:/app/sites.json:ro
     environment:
       - INFLUX_URL=http://influxdb:8086
