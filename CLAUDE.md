@@ -29,10 +29,10 @@ Both installations write to the same InfluxDB instance (tagged by `site`), serve
 | 7 | Multi-site foundation (`sites.json`, `site` tag, `/api/v1/sites`) | ✅ Complete — 35/35 tests |
 | 7.5 | Historical data migration (backfill `site=home` on all records) | ✅ Complete — 10.9M raw + 27k medium + 2.3k hourly records |
 | 8 | Linux BLE bridge for garage Victron MPPTs | ✅ Complete — 16 unit + 4 integration tests |
-| 9 | LiTime BMS support (active BLE poll, `battery` measurement) | Not started |
+| 9 | LiTime BMS support (active BLE poll, `battery` measurement) | Code complete — hardware verify pending |
 | 10 | Multi-site API (full test coverage, battery endpoint) | Not started |
 | 11 | Dashboard multi-site UI (site selector, BMS widget, topology switching) | Not started |
-| 12 | Setup.sh multi-site wizard | Not started |
+| 12 | Setup.sh multi-site wizard + dashboard device management (add/remove BMS) | Not started |
 
 ---
 
@@ -106,6 +106,7 @@ The authoritative spec is `multi-site-design.md` (v5.0). Summary of what we're b
 - Checks for hci0; installs `firmware-atheros` if absent
 - Pre-commit hook: blocks commits containing real MAC addresses
 - Fully idempotent
+- **Dashboard device management UI** — add and remove BMS devices from the dashboard (not just CLI wizard). User must confirm which physical battery they're adding (show live SOC/V/temp) or confirm removal before changes are saved to `sites.json` and ble-bridge is restarted.
 
 ---
 
