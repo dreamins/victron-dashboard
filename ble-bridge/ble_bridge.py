@@ -147,8 +147,14 @@ def run_fixture_mode(fixture_file: str, device_map: Dict[str, Dict], writer: Inf
     return count
 
 
+# Shared scanner reference — BMS pollers stop/start it around connect() to avoid
+# org.bluez.Error.InProgress (BlueZ cannot connect while discovery is active).
+_victron_scanner = None
+
+
 async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter):
     """Production mode: scan BLE indefinitely, decode Victron advertisements."""
+    global _victron_scanner
     from bleak import BleakScanner
 
     seen: Dict[str, int] = {}
@@ -177,13 +183,49 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter):
                          " ".join(f"{k}={v:.1f}" for k, v in list(fields.items())[:3]))
 
     log.info("BLE scan started — watching %d Victron devices", len(device_map))
-    async with BleakScanner(detection_callback=_callback):
+    scanner = BleakScanner(detection_callback=_callback)
+    _victron_scanner = scanner
+    await scanner.start()
+    try:
         while True:
             await asyncio.sleep(3600)
+    finally:
+        _victron_scanner = None
+        try:
+            await scanner.stop()
+        except Exception:
+            pass
+
+
+async def _scanner_stop() -> bool:
+    """Stop the Victron scanner if running. Returns True if it was running."""
+    if _victron_scanner is None:
+        return False
+    try:
+        await _victron_scanner.stop()
+        return True
+    except Exception:
+        return False
+
+
+async def _scanner_start():
+    """Restart the Victron scanner if it exists."""
+    if _victron_scanner is None:
+        return
+    try:
+        await _victron_scanner.start()
+    except Exception:
+        pass
 
 
 async def run_bms_poller(info: Dict, writer: InfluxWriter):
-    """Connect to one LiTime BMS, poll every 5 s, reconnect with exponential backoff."""
+    """Connect to one LiTime BMS, poll every 5 s, reconnect with exponential backoff.
+
+    BlueZ returns org.bluez.Error.InProgress if a Device.Connect() is issued while
+    the adapter is in discovery mode.  We stop the Victron scanner before each
+    connect attempt and restart it once the BMS is connected (concurrent scan +
+    active connection is fine once the connection is established).
+    """
     from drivers.litime import LiTimeBMS
 
     mac     = info["mac"]
@@ -206,44 +248,42 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
 
     bms.on_data_callback = _on_data
 
-    # Wait for the passive BLE scanner to start and populate BlueZ's device cache.
-    # BleakClient.connect() needs the device in the cache; if it's not there yet it
-    # calls StartDiscovery, which conflicts with the already-running scanner and
-    # returns org.bluez.Error.InProgress.  15 s is conservative — the BMS typically
-    # appears in the cache within 5–10 s of scanning starting.
-    if mac:
-        log.info("[%s/%s] waiting 15 s for BLE scanner to populate device cache", site_id, dev_id)
-        await asyncio.sleep(15)
+    # Give the scanner a moment to start before we stop it for the first connect.
+    await asyncio.sleep(3)
 
     while True:
-        connected_ok  = False
-        in_progress   = False
+        connected_ok = False
+        scan_was_running = False
         try:
+            # Stop scanner: BlueZ cannot connect while discovery is active.
+            scan_was_running = await _scanner_stop()
+            if scan_was_running:
+                await asyncio.sleep(0.5)  # let StopDiscovery complete
+
             await bms.connect()
             connected_ok = True
             backoff_idx  = 0
+
+            # Scanner can run concurrently once the BMS connection is established.
+            await _scanner_start()
+            scan_was_running = False
+
             while bms.is_connected:
                 await bms.poll()
                 await asyncio.sleep(5)
             log.info("[%s/%s] BMS disconnected, reconnecting", site_id, dev_id)
         except Exception as e:
-            if "InProgress" in str(e):
-                in_progress = True
-                log.warning("[%s/%s] BMS InProgress — scanner still discovering, retry in 5s",
-                            site_id, dev_id)
-            else:
-                log.error("[%s/%s] BMS error: %s — reconnect in %ds",
-                          site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
+            log.error("[%s/%s] BMS error: %s — reconnect in %ds",
+                      site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
         finally:
+            if scan_was_running:
+                await _scanner_start()
             await bms.disconnect()
 
-        if in_progress:
-            await asyncio.sleep(5)
-        else:
-            delay = _BMS_BACKOFF[backoff_idx]
-            await asyncio.sleep(delay)
-            if not connected_ok:
-                backoff_idx = min(backoff_idx + 1, len(_BMS_BACKOFF) - 1)
+        delay = _BMS_BACKOFF[backoff_idx]
+        await asyncio.sleep(delay)
+        if not connected_ok:
+            backoff_idx = min(backoff_idx + 1, len(_BMS_BACKOFF) - 1)
 
 
 async def run_production(device_map: Dict[str, Dict], writer: InfluxWriter):
