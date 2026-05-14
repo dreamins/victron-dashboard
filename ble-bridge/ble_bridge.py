@@ -277,8 +277,13 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
                 await asyncio.sleep(5)
             log.info("[%s/%s] BMS disconnected, reconnecting", site_id, dev_id)
         except Exception as e:
-            log.error("[%s/%s] BMS error: %s — reconnect in %ds",
-                      site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
+            msg = str(e)
+            if "not found" in msg.lower():
+                log.warning("[%s/%s] BMS not advertising (may be connected to another device) "
+                            "— will retry in %ds", site_id, dev_id, _BMS_BACKOFF[backoff_idx])
+            else:
+                log.error("[%s/%s] BMS error: %s — reconnect in %ds",
+                          site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
         finally:
             if scan_was_running:
                 await _scanner_start()
