@@ -90,24 +90,37 @@ async def main() -> int:
         print("Make sure the BMS is powered on and within Bluetooth range, then try again.")
         return 1
 
-    if len(found) == 1 and len(unconfigured) == 1:
-        addr, _, _ = found[0]
-        site_id, dev = unconfigured[0]
-        dev["mac"] = addr
-        print(f"Found one BMS ({addr}) — auto-assigned to '{dev['label']}'.")
-        _save(path, config)
-        return 0
-
-    # Multiple devices or slots: read live data, then ask the user to identify each
-    print(f"Found {len(found)} LiTime BMS device(s). Reading live data for identification...\n")
+    # Read live data from all found devices for identification / confirmation.
+    print(f"Found {len(found)} LiTime BMS device(s). Reading live data...\n")
     snapshots = []
     for i, (addr, w_uuid, n_uuid) in enumerate(found, 1):
         print(f"  Connecting to [{i}] {addr}... ", end="", flush=True)
         fields = await _read_snapshot(addr, w_uuid, n_uuid)
-        snapshots.append((addr, fields))
+        snapshots.append((addr, w_uuid, n_uuid, fields))
         print(f"SOC={_fmt(fields, 'soc', '{:.0f}%')}  "
               f"V={_fmt(fields, 'battery_voltage', '{:.2f}V')}  "
               f"Temp={_fmt(fields, 'temperature', '{:.0f}°C')}")
+
+    if len(found) == 1 and len(unconfigured) == 1:
+        addr, _, _, fields = snapshots[0]
+        site_id, dev = unconfigured[0]
+        print(f"\nFound one BMS. Is this your \"{dev['label']}\" (site={site_id})?")
+        print(f"  Address : {addr}")
+        print(f"  SOC     : {_fmt(fields, 'soc', '{:.0f}%')}")
+        print(f"  Voltage : {_fmt(fields, 'battery_voltage', '{:.2f}V')}")
+        print(f"  Temp    : {_fmt(fields, 'temperature', '{:.0f}°C')}")
+        try:
+            answer = input("\nAssign this BMS to that slot? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            return 1
+        if answer in ("", "y", "yes"):
+            dev["mac"] = addr
+            _save(path, config)
+            return 0
+        else:
+            print("Aborted — no changes made.")
+            return 1
 
     assigned: set = set()
     for site_id, dev in unconfigured:
@@ -125,7 +138,7 @@ async def main() -> int:
 
         print(f"\nWhich device is \"{dev['label']}\"?  (site={site_id}, id={dev['id']})")
         for i in available:
-            addr, fields = snapshots[i - 1]
+            addr, _, _, fields = snapshots[i - 1]
             print(f"  [{i}] {addr}  "
                   f"SOC={_fmt(fields, 'soc', '{:.0f}%')}  "
                   f"V={_fmt(fields, 'battery_voltage', '{:.2f}V')}  "
