@@ -15,8 +15,8 @@ services:
       - DOCKER_INFLUXDB_INIT_USERNAME=admin
       - DOCKER_INFLUXDB_INIT_PASSWORD=test_influx_admin_pass
       - DOCKER_INFLUXDB_INIT_ORG=home
-      - DOCKER_INFLUXDB_INIT_BUCKET=victron_test
-      - DOCKER_INFLUXDB_INIT_RETENTION=24h
+      - DOCKER_INFLUXDB_INIT_BUCKET=victron
+      - DOCKER_INFLUXDB_INIT_RETENTION=720h
       - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=test_influx_token_aabbccdd1122
     restart: "no"
 
