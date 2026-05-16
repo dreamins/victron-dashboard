@@ -189,6 +189,23 @@ class LiTimeBMS:
         self.is_connected = False
         log.warning("LiTime %s disconnected unexpectedly", self.address)
 
+    async def _discover_uuids(self) -> Tuple[Optional[str], Optional[str]]:
+        """Probe characteristic pairs on the already-connected client to find write/notify UUIDs."""
+        client = self._client
+        for service in client.services:
+            notifiable = [c.uuid for c in service.characteristics
+                          if "notify" in c.properties]
+            writable   = [c.uuid for c in service.characteristics
+                          if "write" in c.properties
+                          or "write-without-response" in c.properties]
+            for w_uuid in writable:
+                for n_uuid in notifiable:
+                    if await _try_characteristic_pair(client, w_uuid, n_uuid, timeout=2.5):
+                        log.info("LiTime %s: write=%s notify=%s", self.address, w_uuid, n_uuid)
+                        return w_uuid, n_uuid
+        log.warning("LiTime %s: no characteristic pair responded to c_13 probe", self.address)
+        return None, None
+
     async def connect(self):
         from bleak import BleakClient
 
@@ -209,6 +226,11 @@ class LiTimeBMS:
         await self._client.connect()
         self.is_connected = True
         self._buffer.clear()
+
+        # When the address is known but UUIDs are not (e.g. loaded from sites.json),
+        # probe the connected device to find the right characteristic pair.
+        if self._write_uuid is None or self._notify_uuid is None:
+            self._write_uuid, self._notify_uuid = await self._discover_uuids()
 
         notify_uuid = self._notify_uuid or _fallback_notify(self._client)
         await self._client.start_notify(notify_uuid, self._notification_handler)
@@ -234,7 +256,10 @@ class LiTimeBMS:
             return
         write_uuid = self._write_uuid or _fallback_write(self._client)
         async with self._lock:
-            await self._client.write_gatt_char(write_uuid, build_frame(0x13), response=True)
+            await asyncio.wait_for(
+                self._client.write_gatt_char(write_uuid, build_frame(0x13), response=True),
+                timeout=10.0,
+            )
 
     def _notification_handler(self, sender, data: bytes):
         self._buffer.extend(data)

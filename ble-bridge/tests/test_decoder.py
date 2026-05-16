@@ -527,3 +527,97 @@ class TestRemainingWh:
         # 91% * 100Ah * 13.31V = 1211 Wh
         expected = round(91 / 100.0 * 100 * 13.31, 0)
         assert fields["remaining_wh"] == pytest.approx(expected, abs=1)
+
+
+# ─── LiTime UUID discovery ─────────────────────────────────────────────────────
+
+def _make_mock_bleak_client(client_instance):
+    """Return a mock bleak module whose BleakClient() returns client_instance."""
+    import sys
+    from unittest.mock import MagicMock
+    mock_bleak = MagicMock()
+    mock_bleak.BleakClient = MagicMock(return_value=client_instance)
+    return mock_bleak
+
+
+class TestLiTimeUuidDiscovery:
+    """connect() must discover write/notify UUIDs when they are not already known."""
+
+    def test_uuids_discovered_when_unknown_on_connect(self):
+        """Address set but no UUIDs → _discover_uuids is called and UUIDs are stored."""
+        import asyncio
+        import sys
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from drivers.litime import LiTimeBMS
+
+        async def _run():
+            bms = LiTimeBMS("AA:BB:CC:DD:EE:FF")
+            assert bms._write_uuid is None
+            assert bms._notify_uuid is None
+
+            mock_client = MagicMock()
+            mock_client.is_connected = True
+            mock_client.connect = AsyncMock()
+            mock_client.start_notify = AsyncMock()
+            mock_client.services = []
+
+            bms._discover_uuids = AsyncMock(return_value=("w-uuid", "n-uuid"))
+
+            with patch.dict(sys.modules, {"bleak": _make_mock_bleak_client(mock_client)}):
+                await bms.connect()
+
+            bms._discover_uuids.assert_called_once()
+            assert bms._write_uuid == "w-uuid"
+            assert bms._notify_uuid == "n-uuid"
+
+        asyncio.run(_run())
+
+    def test_uuids_not_rediscovered_when_already_known(self):
+        """UUIDs already set (from a prior probe) must not be overwritten on reconnect."""
+        import asyncio
+        import sys
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from drivers.litime import LiTimeBMS
+
+        async def _run():
+            bms = LiTimeBMS("AA:BB:CC:DD:EE:FF")
+            bms._write_uuid  = "saved-write"
+            bms._notify_uuid = "saved-notify"
+
+            mock_client = MagicMock()
+            mock_client.is_connected = True
+            mock_client.connect = AsyncMock()
+            mock_client.start_notify = AsyncMock()
+            mock_client.services = []
+
+            bms._discover_uuids = AsyncMock(return_value=(None, None))
+
+            with patch.dict(sys.modules, {"bleak": _make_mock_bleak_client(mock_client)}):
+                await bms.connect()
+
+            bms._discover_uuids.assert_not_called()
+            assert bms._write_uuid == "saved-write"
+
+        asyncio.run(_run())
+
+    def test_poll_timeout_raises(self):
+        """poll() raises asyncio.TimeoutError if write_gatt_char stalls — prevents event-loop hang."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from drivers.litime import LiTimeBMS
+
+        async def _run():
+            bms = LiTimeBMS("AA:BB:CC:DD:EE:FF")
+            bms._write_uuid  = "write-uuid"
+            bms.is_connected = True
+
+            mock_client = MagicMock()
+            async def _hang(*a, **kw):
+                await asyncio.sleep(9999)
+            mock_client.write_gatt_char = _hang
+            bms._client = mock_client
+
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(bms.poll(), timeout=0.2)
+
+        asyncio.run(_run())
