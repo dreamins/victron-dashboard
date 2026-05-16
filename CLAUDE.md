@@ -43,8 +43,8 @@ Both installations write to the same InfluxDB instance (tagged by `site`), serve
 **Result:** 41/41 unit tests + hardware verified (SOC=91%, V=13.31V, A=-0.00A via `/api/v1/battery`).
 
 **Hardware facts:**
-- Old Atheros dongle (`hci0`, USB 18:CF:5E:8F:B0:D1): BT 4.1 — cannot see BLE 5.0 extended advertising
-- New Realtek dongle (`hci1`, USB 2357:0604): BT 5.1 — firmware from `firmware-realtek` package
+- Old Atheros dongle (`hci0`): BT 4.1 — cannot see BLE 5.0 extended advertising
+- New Realtek dongle (`hci1`, USB 2357:0604 = TP-Link UB500): BT 5.1 — firmware from `firmware-realtek` package
 - `BLE_ADAPTER=hci1` set in `.env` by `verify_phase9_hardware.sh`; passed into container via `docker-compose.yml`
 - `verify_phase9_hardware.sh` handles first-run setup: firmware install, USB soft-replug, bluetooth restart, adapter detection
 
