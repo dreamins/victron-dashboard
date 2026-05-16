@@ -3,13 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Solar Monitor v2.2</title>
+<title>Solar Monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
-/* ── Dark theme (default) ─────────────────────────────────────────────── */
 :root {
   --bg:          #05070a;
   --bg-grad:     radial-gradient(circle at 50% -20%, #1e1b4b 0%, #05070a 70%);
@@ -35,7 +34,6 @@
   --amber:  #f59e0b;
   --hh: 64px;
 }
-/* ── Light theme ──────────────────────────────────────────────────────── */
 body.light {
   --bg:          #f1f5f9;
   --bg-grad:     radial-gradient(circle at 50% -20%, #cbd5e1 0%, #f1f5f9 70%);
@@ -64,12 +62,11 @@ body {
   height:100%; display:flex; flex-direction:column; overflow:hidden;
   background:var(--bg); color:var(--text);
   font-family:'Plus Jakarta Sans',sans-serif; font-size:14px; line-height:1.6;
-  transition: background 0.3s, color 0.3s;
+  transition:background 0.3s,color 0.3s;
 }
 body::before {
   content:''; position:fixed; inset:0; z-index:-1;
-  background: var(--bg-grad);
-  transition: background 0.3s;
+  background:var(--bg-grad); transition:background 0.3s;
 }
 
 /* ── Header ──────────────────────────────────────────────────────────── */
@@ -85,9 +82,9 @@ header {
   width:36px; height:36px; border-radius:10px;
   background:linear-gradient(135deg,#ffcc33,#f97316);
   display:flex; align-items:center; justify-content:center;
-  font-size:20px; box-shadow:0 0 20px rgba(251,191,36,0.3);
+  font-size:18px; box-shadow:0 0 20px rgba(251,191,36,0.3);
 }
-.hdr-right { display:flex; align-items:center; gap:16px; }
+.hdr-right { display:flex; align-items:center; gap:12px; }
 #status-pills { display:flex; align-items:center; gap:10px; }
 .s-pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--sub); }
 .s-dot  { width:8px; height:8px; border-radius:50%; }
@@ -97,10 +94,74 @@ header {
 #theme-btn {
   background:var(--surf-2); border:1px solid var(--border); color:var(--text);
   width:36px; height:36px; border-radius:10px; cursor:pointer;
-  font-size:18px; display:flex; align-items:center; justify-content:center;
-  transition:all 0.2s;
+  display:flex; align-items:center; justify-content:center; transition:all 0.2s;
 }
 #theme-btn:hover { background:var(--surf-1); }
+
+/* ── Site dropdown ───────────────────────────────────────────────────── */
+.site-dropdown { position:relative; }
+#site-btn {
+  display:flex; align-items:center; gap:7px;
+  background:var(--surf-2); border:1px solid var(--border); color:var(--text);
+  padding:0 12px; height:36px; border-radius:10px; cursor:pointer;
+  font-family:inherit; font-size:13px; font-weight:600;
+  transition:all 0.2s; white-space:nowrap; max-width:200px;
+}
+#site-btn:hover { background:var(--surf-1); }
+#site-btn-label { overflow:hidden; text-overflow:ellipsis; }
+#site-menu {
+  position:absolute; right:0; top:calc(100% + 8px);
+  background:var(--hdr-bg); backdrop-filter:blur(16px);
+  border:1px solid var(--border); border-radius:14px;
+  min-width:180px; overflow:hidden;
+  box-shadow:0 12px 40px rgba(0,0,0,0.35); z-index:100;
+}
+#site-menu.hidden { display:none; }
+.site-menu-item {
+  display:flex; align-items:center; gap:8px; width:100%;
+  padding:9px 14px; background:transparent; border:none; color:var(--text);
+  font-family:inherit; font-size:13px; font-weight:500;
+  text-align:left; cursor:pointer; transition:background 0.12s;
+}
+.site-menu-item:hover { background:var(--surf-2); }
+.site-menu-item.active { color:var(--batt); font-weight:700; }
+.site-menu-check { width:14px; font-size:11px; color:var(--batt); flex-shrink:0; }
+.site-menu-divider { height:1px; background:var(--border); }
+.site-menu-all { color:var(--sub); font-size:12px; }
+.site-menu-all:hover { color:var(--text); }
+
+/* ── Site Picker ─────────────────────────────────────────────────────── */
+#site-picker {
+  flex:1; display:none; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding:32px 24px; overflow-y:auto; min-height:0;
+}
+.picker-header { text-align:center; margin-bottom:36px; }
+.picker-header h1 { font-size:26px; font-weight:800; letter-spacing:-0.5px; margin-bottom:6px; }
+.picker-header p { font-size:14px; color:var(--sub); }
+#picker-cards {
+  display:grid; grid-template-columns:repeat(2,1fr);
+  gap:20px; max-width:740px; width:100%;
+}
+.picker-card {
+  background:var(--surf-1); backdrop-filter:blur(12px);
+  border:1.5px solid var(--border); border-radius:20px;
+  padding:24px 20px 20px; cursor:pointer;
+  transition:transform 0.25s cubic-bezier(.4,0,.2,1),border-color 0.25s,box-shadow 0.25s;
+  display:flex; flex-direction:column; align-items:center; text-align:center;
+}
+.picker-card:hover {
+  transform:translateY(-5px);
+  border-color:rgba(255,204,51,0.45);
+  box-shadow:0 16px 48px rgba(0,0,0,0.3),0 0 0 1px rgba(255,204,51,0.1);
+}
+body.light .picker-card:hover { box-shadow:0 12px 32px rgba(0,0,0,0.1); }
+.site-illo { width:140px; height:116px; margin-bottom:14px; }
+.picker-card h2 { font-size:17px; font-weight:800; margin-bottom:6px; }
+.picker-status { min-height:22px; }
+.pstatus-loading { color:var(--dim); font-size:14px; letter-spacing:3px; animation:blink 1.2s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:0.3} 50%{opacity:1} }
+.pstatus-val { font-size:15px; font-weight:700; color:var(--solar); }
 
 /* ── Banner ──────────────────────────────────────────────────────────── */
 #bridge-banner {
@@ -109,39 +170,32 @@ header {
 }
 #bridge-banner.hidden { display:none; }
 
-/* ── Layout ──────────────────────────────────────────────────────────── */
-#wrap { flex:1; display:flex; overflow:hidden; min-height:0; }
+/* ── Main layout ─────────────────────────────────────────────────────── */
+#wrap { flex:1; display:none; overflow:hidden; min-height:0; }
 #left {
   flex:0 0 42%; display:flex; flex-direction:column;
   overflow-y:auto; overflow-x:hidden;
   border-right:2px solid var(--border);
 }
-#flow {
-  padding:4px 20px; flex-shrink:0;
-  background: var(--flow-grad);
-}
+#flow { padding:4px 20px; flex-shrink:0; background:var(--flow-grad); }
 #flow svg { width:100%; filter:drop-shadow(0 0 30px rgba(0,0,0,0.15)); }
 body:not(.light) #flow svg { filter:drop-shadow(0 0 30px rgba(0,0,0,0.3)); }
 
-/* ── SVG node styles (CSS vars so light/dark work) ─────────────────── */
 .nb { fill:var(--node-fill); stroke:var(--node-stroke); stroke-width:1.5; }
 .nl { fill:var(--node-label); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; }
 .nv { fill:var(--node-val); font-size:14px; font-weight:700; }
 .nbig { font-size:20px; font-weight:800; }
 @keyframes dash { to { stroke-dashoffset:-20; } }
-.fl { fill:none; stroke:#64748b; stroke-width:4; stroke-linecap:butt; opacity: 1.0; }
+.fl { fill:none; stroke:#64748b; stroke-width:4; stroke-linecap:butt; opacity:1.0; }
 .fl-active { stroke-dasharray:7 13; }
 
 /* ── Cards ───────────────────────────────────────────────────────────── */
-#cards {
-  display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
-  padding:0 20px 8px;
-}
+#cards { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; padding:0 20px 8px; }
 .card {
   background:var(--surf-1); backdrop-filter:blur(10px);
   border:1px solid var(--border); border-radius:20px;
   padding:16px; cursor:pointer; position:relative; overflow:hidden;
-  transition:all 0.25s cubic-bezier(0.4,0,0.2,1);
+  transition:all 0.25s cubic-bezier(.4,0,.2,1);
 }
 .card:hover { transform:translateY(-3px); background:var(--surf-2); border-color:rgba(255,255,255,0.15); }
 body.light .card:hover { border-color:rgba(0,0,0,0.15); }
@@ -154,12 +208,11 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 .c-hero-num { font-size:40px; font-weight:800; letter-spacing:-1.5px; line-height:1; }
 .c-hero-unit { font-size:16px; font-weight:600; color:var(--sub); }
 .c-hero-label { font-size:12px; font-weight:600; color:var(--sub); margin-bottom:16px; }
-.c-grid {
-  display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
-  padding-top:14px; border-top:1px solid var(--border);
-}
+.c-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding-top:14px; border-top:1px solid var(--border); }
 .m-v { font-size:15px; font-weight:700; color:var(--text); }
 .m-l { font-size:10px; font-weight:700; color:var(--sub); text-transform:uppercase; margin-top:2px; }
+.soc-bar-track { background:var(--surf-2); border-radius:6px; height:6px; margin:10px 0 14px; overflow:hidden; }
+.soc-bar-fill { height:100%; border-radius:6px; transition:width 0.6s cubic-bezier(.4,0,.2,1); }
 
 /* ── Right panel ─────────────────────────────────────────────────────── */
 #right { flex:1; display:flex; flex-direction:column; overflow:hidden; }
@@ -175,10 +228,7 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 }
 .tab-btn:hover { color:var(--text); background:var(--surf-2); }
 .tab-btn.active { color:var(--text); background:var(--surf-2); border-color:var(--border); }
-.range-bar {
-  display:flex; gap:4px; padding:8px 20px;
-  border-bottom:1px solid var(--border); flex-shrink:0;
-}
+.range-bar { display:flex; gap:4px; padding:8px 20px; border-bottom:1px solid var(--border); flex-shrink:0; }
 .r-btn {
   background:transparent; border:none; color:var(--sub);
   padding:4px 10px; border-radius:7px; cursor:pointer;
@@ -188,14 +238,11 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 .chart-scroll { flex:1; overflow-y:auto; padding:20px; }
 .chart-panel { display:none; }
 .chart-panel.active { display:block; }
-.chart-card {
-  background:var(--surf-1); border:1px solid var(--border);
-  border-radius:20px; padding:20px; margin-bottom:20px;
-}
+.chart-card { background:var(--surf-1); border:1px solid var(--border); border-radius:20px; padding:20px; margin-bottom:20px; }
 .chart-title { font-size:11px; font-weight:800; color:var(--sub); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; }
 .chart-container { height:210px; position:relative; }
 
-/* ── Back button (mobile only) ───────────────────────────────────────── */
+/* ── Back button ─────────────────────────────────────────────────────── */
 #back-btn {
   display:none; align-items:center; gap:10px; width:100%;
   padding:12px 20px; border:none; cursor:pointer; flex-shrink:0;
@@ -209,7 +256,6 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
   #left { flex:none; border-right:none; }
   #cards { grid-template-columns:1fr; }
 }
-
 @media(max-width:768px){
   body { overflow-y:auto; }
   #wrap { overflow:visible; min-height:auto; }
@@ -223,20 +269,32 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
   }
   body.mobile-detail #right { display:flex; }
   #back-btn { display:flex; }
-  #status-pills, #last-update { display:none; }
+  #status-pills,#last-update { display:none; }
   .logo { font-size:15px; }
   .tab-bar { padding:8px 12px; }
   .range-bar { padding:6px 12px; }
-  }</style>
+  #picker-cards { grid-template-columns:1fr; gap:14px; max-width:400px; }
+  .site-illo { width:110px; height:90px; margin-bottom:10px; }
+  .picker-header h1 { font-size:22px; }
+  #site-btn { max-width:130px; }
+}
+</style>
 </head>
 <body>
 
 <header>
   <div class="logo">
-    <div class="logo-icon">Sun</div>
-    <span>Solar Monitor v2.2</span>
+    <div class="logo-icon">&#9728;</div>
+    <span>Solar Monitor</span>
   </div>
   <div class="hdr-right">
+    <div class="site-dropdown" id="site-dropdown" style="display:none">
+      <button id="site-btn" onclick="toggleSiteDropdown()">
+        <span id="site-btn-label">-</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+      <div id="site-menu" class="hidden"></div>
+    </div>
     <div id="status-pills"></div>
     <span id="last-update">-</span>
     <button id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark">
@@ -246,6 +304,15 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 </header>
 
 <div id="bridge-banner" class="hidden">Bridge Offline - check ESP32 connection</div>
+
+<!-- Site picker — shown when no site is selected -->
+<div id="site-picker">
+  <div class="picker-header">
+    <h1>Choose an installation</h1>
+    <p>Select a site to monitor</p>
+  </div>
+  <div id="picker-cards"></div>
+</div>
 
 <div id="wrap">
   <div id="left">
@@ -265,7 +332,6 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
             <feGaussianBlur stdDeviation="3.5" result="b"/>
             <feComposite in="SourceGraphic" in2="b" operator="over"/>
           </filter>
-          <!-- Solar cell tile: 3 rows × 2 cols inside each PV box -->
           <pattern id="solar-cell" x="0" y="0" width="26" height="22" patternUnits="userSpaceOnUse">
             <rect x="1" y="1" width="24" height="20" rx="2"
               fill="rgba(30,58,138,0.22)" stroke="rgba(255,204,51,0.35)" stroke-width="0.6"/>
@@ -274,10 +340,8 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
           <clipPath id="batt-clip"><rect x="154" y="254" width="192" height="74" rx="7"/></clipPath>
         </defs>
 
-        <!-- PV Panel 1 - solar cell tile + label + value -->
         <rect id="pv1-box" class="nb" x="20" y="12" width="160" height="68" rx="12"/>
         <rect x="24" y="16" width="152" height="60" rx="9" fill="url(#solar-cell)" opacity="0.9"/>
-        <!-- aluminium frame lines -->
         <line x1="24" y1="37" x2="176" y2="37" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <line x1="24" y1="55" x2="176" y2="55" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
         <line x1="76" y1="16" x2="76" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
@@ -286,7 +350,6 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <text class="nv" id="flow-pv1-volt" x="100" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">-</text>
         <text class="nv" id="flow-pv1-val" x="100" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">-</text>
 
-        <!-- PV Panel 2 -->
         <rect id="pv2-box" class="nb" x="320" y="12" width="160" height="68" rx="12"/>
         <rect x="324" y="16" width="152" height="60" rx="9" fill="url(#solar-cell)" opacity="0.9"/>
         <line x1="324" y1="37" x2="476" y2="37" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
@@ -297,7 +360,6 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <text class="nv" id="flow-pv2-volt" x="400" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">-</text>
         <text class="nv" id="flow-pv2-val" x="400" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">-</text>
 
-        <!-- MPPT Nodes - labels updated from JS, clickable -->
         <rect id="mppt1-box" class="nb" x="20" y="112" width="160" height="86" rx="20" style="cursor:pointer" onclick="switchTab(0)"/>
         <text id="mppt1-label" class="nl" x="100" y="134" text-anchor="middle" style="cursor:pointer" onclick="switchTab(0)">-</text>
         <rect id="mppt1-status-bg" x="58" y="140" width="84" height="18" rx="9" fill="#1f2937"/>
@@ -310,30 +372,22 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
         <text id="mppt2-status-txt" class="nl" x="400" y="153" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(1)">-</text>
         <text class="nv nbig" id="mppt2-flow-val" x="400" y="184" text-anchor="middle" style="cursor:pointer" onclick="switchTab(1)">-</text>
 
-        <!-- Battery: LiFePO4 rectangular pack (LiTime style) - whole group is clickable -->
         <g onclick="switchTab(2)" style="cursor:pointer">
-          <!-- Main body -->
           <rect class="nb" x="150" y="248" width="200" height="84" rx="10"/>
-          <!-- Cell dividers - 4S pack visual -->
           <line x1="200" y1="252" x2="200" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
           <line x1="250" y1="252" x2="250" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
           <line x1="300" y1="252" x2="300" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
-          <!-- Negative terminal (-) bolt on top-left -->
           <rect x="162" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
           <text x="172" y="248" text-anchor="middle" style="fill:var(--sub);font-size:10px;font-weight:900">&minus;</text>
-          <!-- Positive terminal (+) bolt on top-right -->
           <rect x="318" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
           <text x="328" y="248" text-anchor="middle" style="fill:#ef4444;font-size:10px;font-weight:900">+</text>
-          <!-- Charge fill bar -->
           <rect id="batt-fill-bar" x="154" y="252" width="0" height="76" fill="url(#g-batt-hi)" opacity="0.45" clip-path="url(#batt-clip)"/>
-          <!-- Labels -->
           <text class="nl" x="250" y="266" text-anchor="middle" style="font-size:9px;letter-spacing:0.5px">LiFePO4 &middot; Battery</text>
           <text class="nv" id="flow-batt-v" x="208" y="300" text-anchor="middle" style="font-size:19px;font-weight:800;fill:var(--batt)">-</text>
           <text id="flow-batt-soc" style="fill:var(--sub);font-size:12px;font-weight:700" x="308" y="290" text-anchor="middle">-</text>
           <text class="nv" id="flow-batt-t" x="308" y="308" text-anchor="middle" style="font-size:12px;fill:#9ca3af">-</text>
         </g>
 
-        <!-- Load nodes - hidden until JS shows them -->
         <g id="mppt1-load-grp" style="display:none">
           <circle class="nb" cx="42" cy="286" r="24"/>
           <text id="mppt1-load-val" class="nv" x="42" y="291" text-anchor="middle" style="font-size:11px">-</text>
@@ -345,14 +399,12 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
           <text class="nl" x="458" y="318" text-anchor="middle">Load</text>
         </g>
 
-        <!-- Flow paths (2px gap to avoid box overlap) -->
-        <path id="path-pv1"         class="fl" d="M100,82  L100.01,110"/>
-        <path id="path-pv2"         class="fl" d="M400,82  L400.01,110"/>
-        <path id="path-mppt1"       class="fl" d="M100,200 C100,230 172,230 172,238"/>
-        <path id="path-mppt2"       class="fl" d="M400,200 C400,230 328,230 328,238"/>
-        <!-- load paths end at circle edge (r=24), not centre, so they don't overlap the label -->
-        <path id="path-mppt1-load"  class="fl" d="M100,200 L55,266"   style="display:none"/>
-        <path id="path-mppt2-load"  class="fl" d="M400,200 L445,266"  style="display:none"/>
+        <path id="path-pv1"        class="fl" d="M100,82  L100.01,110"/>
+        <path id="path-pv2"        class="fl" d="M400,82  L400.01,110"/>
+        <path id="path-mppt1"      class="fl" d="M100,200 C100,230 172,230 172,238"/>
+        <path id="path-mppt2"      class="fl" d="M400,200 C400,230 328,230 328,238"/>
+        <path id="path-mppt1-load" class="fl" d="M100,200 L55,266"  style="display:none"/>
+        <path id="path-mppt2-load" class="fl" d="M400,200 L445,266" style="display:none"/>
       </svg>
     </div>
     <div id="cards"></div>
@@ -363,12 +415,9 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
       Back to overview
     </button>
-    <div class="tab-bar" id="tab-bar">
-      <!-- tab buttons injected by JS so names come from real device data -->
-    </div>
+    <div class="tab-bar" id="tab-bar"></div>
     <div class="range-bar" id="range-bar"></div>
     <div class="chart-scroll">
-      <!-- panels injected by JS -->
       <div id="panels"></div>
     </div>
   </div>
@@ -401,20 +450,18 @@ const STATES={
   252:['Ext. control',   '#6366f1'],
 };
 
-// ── State ──────────────────────────────────────────────────────────────────
-
+// ── State ──────────────────────────────────────────────────────────────
 var S={
   current:{}, devices:[], bridge_online:true,
   mptts:[], bsense:null,
-  bvolt:null, bsoc:null,   // computed in renderFlow, shared with renderCards
-  tab:3,                   // default: Insights (no device selected)
-  range:'24h', last:null, chartsLoaded:false,
-  tabDefs:[]               // [{id, label, field:'pv_power'|'battery_voltage', panel}]
+  bvolt:null, bsoc:null,
+  tab:3, range:'24h', last:null, chartsLoaded:false, tabDefs:[],
+  activeSite:null, sites:[], siteUi:{}, battData:{}, bmsDevice:null,
 };
 var CH={};
+var _pollInterval=null;
 
-// ── Utilities ──────────────────────────────────────────────────────────────
-
+// ── Utilities ──────────────────────────────────────────────────────────
 function fv(d,f,u='',dp=1){
   const v=d?.fields?.[f];
   if(v==null||isNaN(v)) return '-';
@@ -434,7 +481,6 @@ function wTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(1)+' kW':v+' W'; }
 function whTick(v){ return Math.abs(v)>=1000?(v/1000).toFixed(2)+' kWh':v+' Wh'; }
 function setText(id,v){const e=document.getElementById(id);if(e)e.innerHTML=v;}
 
-// ── LiFePO4 4S SOC estimate (resting voltage only - hide while charging) ────
 const LFP_CURVE=[
   [13.60,100],[13.40,99],[13.30,90],[13.20,80],[13.10,70],
   [13.00,60],[12.90,50],[12.80,40],[12.70,30],[12.60,20],
@@ -459,100 +505,290 @@ function chartColors(){
   };
 }
 
-// ── Theme ──────────────────────────────────────────────────────────────────
-
+// ── Theme ──────────────────────────────────────────────────────────────
 function setTheme(mode){
   document.body.classList.toggle('light', mode==='light');
   document.getElementById('theme-btn').innerHTML = mode==='light'
     ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="overflow:visible"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>'
     : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="overflow:visible"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
-  // Recreate charts with new palette
-  Object.values(CH).forEach(c=>c?.destroy());
-  CH={};
+  Object.values(CH).forEach(c=>c?.destroy()); CH={};
   if(S.chartsLoaded) updateCharts();
 }
 function toggleTheme(){ setTheme(isLight()?'dark':'light'); }
 
-// ── Poll ───────────────────────────────────────────────────────────────────
+// ── Site management ────────────────────────────────────────────────────
 
-async function poll(){
+async function initSites(){
   try{
-    const[cur,devs]=await Promise.all([
-      fetch('/api/v1/current').then(r=>r.json()),
-      fetch('/api/v1/devices').then(r=>r.json())
-    ]);
-    
-    // Only update state if we got actual data (sticky state)
-    if(devs.devices && devs.devices.length > 0){
-      // Deep merge current data to ensure fields don't disappear if a packet is missing them
+    const res=await fetch('/api/v1/sites');
+    const data=await res.json();
+    S.sites=data.sites||[];
+  }catch(e){ S.sites=[]; }
+
+  if(S.sites.length<=1){
+    selectSite((S.sites[0]||{id:'home'}).id);
+    return;
+  }
+  const saved=localStorage.getItem('victron_selected_site');
+  if(saved && S.sites.find(s=>s.id===saved)){
+    selectSite(saved);
+    return;
+  }
+  showPicker();
+}
+
+function showPicker(){
+  document.getElementById('site-picker').style.display='flex';
+  document.getElementById('wrap').style.display='none';
+  document.getElementById('site-dropdown').style.display='none';
+  renderPickerCards();
+}
+
+function homeIllustration(){
+  return `<svg class="site-illo" viewBox="0 0 220 160" xmlns="http://www.w3.org/2000/svg">
+    <line x1="14" y1="148" x2="206" y2="148" stroke="var(--dim)" stroke-width="1"/>
+    <rect x="44" y="90" width="132" height="58" fill="var(--node-fill)" stroke="var(--border)" stroke-width="1.5"/>
+    <polyline points="26,90 110,36 194,90" fill="none" stroke="#ffcc33" stroke-width="2" stroke-linejoin="round"/>
+    <polygon points="44,90 110,46 176,90" fill="rgba(30,58,138,0.2)"/>
+    <rect x="48" y="58" width="52" height="30" rx="2" fill="rgba(30,58,138,0.55)" stroke="#ffcc33" stroke-width="1.2"/>
+    <line x1="74" y1="58" x2="74" y2="88" stroke="#ffcc33" stroke-width="0.6" opacity="0.7"/>
+    <line x1="48" y1="73" x2="100" y2="73" stroke="#ffcc33" stroke-width="0.6" opacity="0.7"/>
+    <rect x="120" y="58" width="52" height="30" rx="2" fill="rgba(30,58,138,0.55)" stroke="#ffcc33" stroke-width="1.2"/>
+    <line x1="146" y1="58" x2="146" y2="88" stroke="#ffcc33" stroke-width="0.6" opacity="0.7"/>
+    <line x1="120" y1="73" x2="172" y2="73" stroke="#ffcc33" stroke-width="0.6" opacity="0.7"/>
+    <rect x="93" y="114" width="34" height="34" fill="none" stroke="var(--dim)" stroke-width="1.2"/>
+    <circle cx="123" cy="131" r="2" fill="var(--dim)"/>
+    <rect x="53" y="100" width="24" height="18" fill="none" stroke="var(--dim)" stroke-width="1"/>
+    <line x1="65" y1="100" x2="65" y2="118" stroke="var(--dim)" stroke-width="0.8" opacity="0.6"/>
+    <rect x="143" y="100" width="24" height="18" fill="none" stroke="var(--dim)" stroke-width="1"/>
+    <line x1="155" y1="100" x2="155" y2="118" stroke="var(--dim)" stroke-width="0.8" opacity="0.6"/>
+    <g transform="translate(183,24)" opacity="0.85">
+      <path d="M0,12 Q7,4 14,12" stroke="#10b981" fill="none" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M2.5,9 Q7,2.5 11.5,9" stroke="#10b981" fill="none" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M5,6 Q7,1.5 9,6" stroke="#10b981" fill="none" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="7" cy="14" r="1.8" fill="#10b981"/>
+    </g>
+  </svg>`;
+}
+
+function garageIllustration(){
+  return `<svg class="site-illo" viewBox="0 0 220 160" xmlns="http://www.w3.org/2000/svg">
+    <line x1="14" y1="148" x2="206" y2="148" stroke="var(--dim)" stroke-width="1"/>
+    <rect x="16" y="78" width="188" height="70" fill="var(--node-fill)" stroke="var(--border)" stroke-width="1.5"/>
+    <rect x="8" y="70" width="204" height="10" rx="1" fill="var(--node-fill)" stroke="var(--border)" stroke-width="1.2"/>
+    <rect x="18" y="24" width="82" height="44" rx="2" fill="rgba(30,58,138,0.55)" stroke="#ffcc33" stroke-width="1.2"/>
+    <line x1="59" y1="24" x2="59" y2="68" stroke="#ffcc33" stroke-width="0.6" opacity="0.7"/>
+    <line x1="18" y1="46" x2="100" y2="46" stroke="#ffcc33" stroke-width="0.6" opacity="0.7"/>
+    <rect x="120" y="24" width="82" height="44" rx="2" fill="rgba(30,58,138,0.55)" stroke="#ffcc33" stroke-width="1.2"/>
+    <line x1="161" y1="24" x2="161" y2="68" stroke="#ffcc33" stroke-width="0.6" opacity="0.7"/>
+    <line x1="120" y1="46" x2="202" y2="46" stroke="#ffcc33" stroke-width="0.6" opacity="0.7"/>
+    <rect x="34" y="90" width="152" height="58" fill="none" stroke="var(--dim)" stroke-width="1.2"/>
+    <line x1="34" y1="106" x2="186" y2="106" stroke="var(--dim)" stroke-width="0.8" opacity="0.5"/>
+    <line x1="34" y1="122" x2="186" y2="122" stroke="var(--dim)" stroke-width="0.8" opacity="0.5"/>
+    <line x1="34" y1="138" x2="186" y2="138" stroke="var(--dim)" stroke-width="0.8" opacity="0.5"/>
+    <line x1="98" y1="128" x2="122" y2="128" stroke="var(--sub)" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+    <g transform="translate(183,26)" opacity="0.85">
+      <path d="M5,0 L12,7 L5,14" stroke="#00f2ff" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M0,3 L8,7 L0,11" stroke="#00f2ff" fill="none" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+    </g>
+  </svg>`;
+}
+
+function siteIllustration(site){
+  return site.bridge==='esp32' ? homeIllustration() : garageIllustration();
+}
+
+async function renderPickerCards(){
+  const cont=document.getElementById('picker-cards');
+  cont.innerHTML=S.sites.map(site=>`
+    <div class="picker-card" onclick="selectSite('${site.id}')">
+      ${siteIllustration(site)}
+      <h2>${site.label}</h2>
+      <div class="picker-status">
+        <span id="pstatus-${site.id}" class="pstatus-loading">&middot;&middot;&middot;</span>
+      </div>
+    </div>
+  `).join('');
+
+  S.sites.forEach(async site=>{
+    const text=await fetchSiteStatus(site).catch(()=>'—');
+    const el=document.getElementById(`pstatus-${site.id}`);
+    if(el){ el.className='pstatus-val'; el.textContent=text; }
+  });
+}
+
+async function fetchSiteStatus(site){
+  if(site.ui?.battery_display==='bms'){
+    try{
+      const batt=await fetch(`/api/v1/battery?site=${site.id}`).then(r=>r.json());
+      const first=Object.values(batt)[0];
+      if(first?.fields?.soc!=null) return `${first.fields.soc.toFixed(0)}% SOC`;
+    }catch(e){}
+  }
+  const cur=await fetch(`/api/v1/current?site=${site.id}`).then(r=>r.json());
+  let total=0, hasData=false;
+  for(const d of Object.values(cur)){
+    if(d.fields?.pv_power!=null){ total+=d.fields.pv_power; hasData=true; }
+  }
+  if(!hasData) return 'No data';
+  return total>=1000?`${(total/1000).toFixed(2)} kW solar`:`${Math.round(total)} W solar`;
+}
+
+function selectSite(id){
+  const site=S.sites.find(s=>s.id===id)||{id,label:id,ui:{},bridge:'esp32'};
+  S.activeSite=id;
+  S.siteUi=site.ui||{};
+  localStorage.setItem('victron_selected_site',id);
+
+  S.current={}; S.devices=[]; S.mptts=[]; S.bsense=null;
+  S.bvolt=null; S.bsoc=null; S.battData={}; S.bmsDevice=null;
+  S.chartsLoaded=false; S.last=null; _cardsKey=''; _dailyCache={};
+  Object.values(CH).forEach(c=>c?.destroy()); CH={};
+
+  document.getElementById('site-picker').style.display='none';
+  document.getElementById('wrap').style.display='flex';
+
+  const dd=document.getElementById('site-dropdown');
+  if(S.sites.length>1){
+    dd.style.display='';
+    document.getElementById('site-btn-label').textContent=site.label;
+    buildSiteMenu();
+  }
+
+  S.tab=3;
+  document.getElementById('tab-bar').innerHTML='';
+  const panels=document.getElementById('panels');
+  panels.innerHTML=''; panels.dataset.count='0';
+
+  startPolling();
+}
+
+function startPolling(){
+  if(_pollInterval) clearInterval(_pollInterval);
+  poll();
+  _pollInterval=setInterval(poll,5000);
+}
+
+function goToPicker(){
+  closeSiteDropdown();
+  if(_pollInterval) clearInterval(_pollInterval);
+  localStorage.removeItem('victron_selected_site');
+  S.activeSite=null;
+  showPicker();
+}
+
+function buildSiteMenu(){
+  const menu=document.getElementById('site-menu');
+  let html=S.sites.map(s=>`
+    <button class="site-menu-item${s.id===S.activeSite?' active':''}"
+            onclick="selectSite('${s.id}');closeSiteDropdown()">
+      <span class="site-menu-check">${s.id===S.activeSite?'&#10003;':''}</span>
+      ${s.label}
+    </button>
+  `).join('');
+  html+='<div class="site-menu-divider"></div>';
+  html+=`<button class="site-menu-item site-menu-all" onclick="goToPicker()">All sites &rarr;</button>`;
+  menu.innerHTML=html;
+}
+
+function toggleSiteDropdown(){
+  const menu=document.getElementById('site-menu');
+  buildSiteMenu();
+  menu.classList.toggle('hidden');
+}
+
+function closeSiteDropdown(){
+  document.getElementById('site-menu').classList.add('hidden');
+}
+
+// ── Poll ───────────────────────────────────────────────────────────────
+async function poll(){
+  if(!S.activeSite) return;
+  try{
+    const sq=`?site=${encodeURIComponent(S.activeSite)}`;
+    const isBms=S.siteUi?.battery_display==='bms';
+    const fetches=[
+      fetch(`/api/v1/current${sq}`).then(r=>r.json()),
+      fetch(`/api/v1/devices${sq}`).then(r=>r.json()),
+    ];
+    if(isBms) fetches.push(fetch(`/api/v1/battery${sq}`).then(r=>r.json()));
+
+    const[cur,devs,batt]=await Promise.all(fetches);
+    if(batt) S.battData=batt;
+
+    if(devs.devices && devs.devices.length>0){
       for(const id in cur){
-        if(!S.current[id]) S.current[id] = cur[id];
-        else {
-          S.current[id].ts = cur[id].ts;
-          S.current[id].fields = { ...S.current[id].fields, ...cur[id].fields };
+        if(!S.current[id]) S.current[id]=cur[id];
+        else{
+          S.current[id].ts=cur[id].ts;
+          S.current[id].fields={...S.current[id].fields,...cur[id].fields};
         }
       }
       S.devices=devs.devices;
       S.bridge_online=devs.bridge_online;
-      
-      const bsDevice = S.devices.find(d => d.id.includes('sense') || d.label.toLowerCase().includes('sense'));
-      S.bsense = bsDevice ? bsDevice.id : null;
-      S.mptts = S.devices.filter(d => d.id !== S.bsense).map(d => d.id).sort();
+
+      const bmsIds=new Set(Object.keys(S.battData));
+      if(isBms){
+        for(const d of S.devices){
+          const f=S.current[d.id]?.fields||{};
+          if('soc' in f && !('charge_state' in f)) bmsIds.add(d.id);
+        }
+      }
+      S.bmsDevice=[...bmsIds][0]||null;
+
+      const bsDevice=S.devices.find(d=>
+        !bmsIds.has(d.id)&&(d.id.includes('sense')||d.label.toLowerCase().includes('sense'))
+      );
+      S.bsense=bsDevice?bsDevice.id:null;
+      S.mptts=S.devices
+        .filter(d=>d.id!==S.bsense&&!bmsIds.has(d.id))
+        .map(d=>d.id).sort();
     }
 
     S.last=Date.now();
     buildTabDefs();
     render();
-    if(!S.chartsLoaded && S.tabDefs.length>0){ S.chartsLoaded=true; updateCharts(); }
-  }catch(e){ console.error("Poll failed:", e); }
+    if(!S.chartsLoaded&&S.tabDefs.length>0){ S.chartsLoaded=true; updateCharts(); }
+  }catch(e){ console.error('Poll failed:',e); }
 }
 
-// ── Tab definitions (built from real device data) ─────────────────────────
-
+// ── Tab definitions ────────────────────────────────────────────────────
 function buildTabDefs(){
-  // Always: one tab per MPPT, one Battery tab, one Insights tab.
-  // Falls back to S.devices so tabs appear even when bridge is offline
-  // and get_current returns nothing (S.current is empty).
   const defs=[];
+  let mptts=S.mptts, bsense=S.bsense;
 
-  let mptts = S.mptts;
-  let bsense = S.bsense;
-  if(mptts.length===0 && S.devices.length>0){
-    // Bridge offline - derive structure from device list instead
-    mptts = S.devices.filter(d=>'charge_state' in (S.current[d.id]?.fields||{}) ||
-      !S.devices.some(x=>x.id===d.id && 'temperature' in (S.current[x.id]?.fields||{})))
-      .map(d=>d.id);
-    // For a cold start where S.current is truly empty, classify by process of
-    // elimination: Battery Sense devices typically have temperature but no
-    // charge_state. With no current data at all, treat all non-bsense as MPPT.
-    const bsenseDevice = S.devices.find(d=>
-      S.current[d.id] && 'temperature' in (S.current[d.id].fields||{}) && !('charge_state' in (S.current[d.id].fields||{}))
+  if(mptts.length===0&&S.devices.length>0){
+    const bmsIds=S.bmsDevice?new Set([S.bmsDevice]):new Set();
+    const bsenseDevice=S.devices.find(d=>
+      !bmsIds.has(d.id)&&S.current[d.id]&&
+      'temperature' in (S.current[d.id].fields||{})&&
+      !('charge_state' in (S.current[d.id].fields||{}))
     );
-    if(bsenseDevice) bsense = bsenseDevice.id;
-    mptts = S.devices.filter(d=>d.id !== (bsenseDevice?.id)).map(d=>d.id);
+    if(bsenseDevice) bsense=bsenseDevice.id;
+    mptts=S.devices.filter(d=>d.id!==(bsenseDevice?.id)&&!bmsIds.has(d.id)).map(d=>d.id);
   }
 
   mptts.forEach((id,i)=>{
-    const label = S.current[id]?.label || S.devices.find(d=>d.id===id)?.label || id;
-    defs.push({id, label, kind:'mppt', idx:i});
+    const label=S.current[id]?.label||S.devices.find(d=>d.id===id)?.label||id;
+    defs.push({id,label,kind:'mppt',idx:i});
   });
-  if(bsense||mptts.length>0){
-    defs.push({id:bsense||'battery', label:'Battery', kind:'battery', idx:defs.length});
-  }
-  defs.push({id:'insights', label:'Insights', kind:'insights', idx:defs.length});
+
+  const battId=S.siteUi?.battery_display==='bms'
+    ?(S.bmsDevice||'battery')
+    :(bsense||(mptts.length>0?'battery':null));
+  if(battId) defs.push({id:battId,label:'Battery',kind:'battery',idx:defs.length});
+  defs.push({id:'insights',label:'Insights',kind:'insights',idx:defs.length});
   S.tabDefs=defs;
 
   const INSIGHTS_IDX=defs.findIndex(d=>d.kind==='insights');
-  if(S.tab===3 && INSIGHTS_IDX>=0) S.tab=INSIGHTS_IDX; // keep pointing to Insights
+  if(S.tab===3&&INSIGHTS_IDX>=0) S.tab=INSIGHTS_IDX;
 
-  // Build tab bar (only rebuild when tab count or active tab changes)
   const bar=document.getElementById('tab-bar');
   const tabHtml=defs.map((d,i)=>
     `<button class="tab-btn${i===S.tab?' active':''}" onclick="switchTab(${i})">${d.label}</button>`
   ).join('');
   if(bar.innerHTML!==tabHtml) bar.innerHTML=tabHtml;
 
-  // Build panels if not yet done or count changed
   const wrap=document.getElementById('panels');
   if(parseInt(wrap.dataset.count||0)!==defs.length){
     wrap.dataset.count=defs.length;
@@ -573,7 +809,6 @@ function buildTabDefs(){
           <div class="chart-card"><div class="chart-title">Total Charging Current</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Total Charging Power</div><div class="chart-container"><canvas id="chart-${i}-p"></canvas></div></div>
         </div>`;
-      // insights
       return `
         <div id="panel-${i}" class="chart-panel ${active}">
           <div class="chart-card"><div class="chart-title">Total Solar Output</div><div class="chart-container"><canvas id="chart-${i}-comb"></canvas></div></div>
@@ -583,8 +818,7 @@ function buildTabDefs(){
   }
 }
 
-// ── Render ─────────────────────────────────────────────────────────────────
-
+// ── Render ─────────────────────────────────────────────────────────────
 function render(){
   document.getElementById('bridge-banner').classList.toggle('hidden',S.bridge_online!==false);
   renderFlow();
@@ -604,90 +838,95 @@ function renderFlow(){
   const m1=S.current[S.mptts[0]], m2=S.current[S.mptts[1]];
   const bs=S.bsense?S.current[S.bsense]:null;
 
-  // Update node labels from real device data
-  const lbl1=m1?.label||S.current[S.mptts[0]]?.label||'-';
-  const lbl2=m2?.label||S.current[S.mptts[1]]?.label||'-';
-  setText('pv1-label',  lbl1);
-  setText('pv2-label',  lbl2);
-  setText('mppt1-label',lbl1);
-  setText('mppt2-label',lbl2);
+  const lbl1=m1?.label||S.devices.find(d=>d.id===S.mptts[0])?.label||'-';
+  const lbl2=m2?.label||S.devices.find(d=>d.id===S.mptts[1])?.label||'-';
+  setText('pv1-label',lbl1); setText('pv2-label',lbl2);
+  setText('mppt1-label',lbl1); setText('mppt2-label',lbl2);
 
-  // PV power: Victron BLE only reports pv_power when actively generating.
-  setPvNode(1, m1);
-  setPvNode(2, m2);
+  setPvNode(1,m1); setPvNode(2,m2);
+  updateMpptNode(1,m1); updateMpptNode(2,m2);
 
-  updateMpptNode(1,m1);
-  updateMpptNode(2,m2);
-
-  // Battery voltage: prefer battery sense device, fall back to MPPT readings
-  S.bvolt = bs?.fields?.battery_voltage
-           ?? m1?.fields?.battery_voltage
-           ?? m2?.fields?.battery_voltage
-           ?? null;
-
-  // SOC: LiFePO4 discharge curve, but only valid at rest (not during Bulk/Absorption)
-  const charging = S.mptts.some(id=>{
-    const cs = S.current[id]?.fields?.charge_state;
-    return cs===3||cs===4; // Bulk or Absorption
-  });
-  S.bsoc = (S.bvolt!=null && !charging) ? lfp4Soc(S.bvolt) : null;
-
-  if(S.bvolt!=null){
-    setText('flow-batt-v', S.bvolt.toFixed(2)+' V');
-    setText('flow-batt-soc', charging ? 'chg' : S.bsoc.toFixed(0)+'%');
+  if(S.siteUi?.battery_display==='bms'&&S.bmsDevice){
+    const bms=S.battData[S.bmsDevice];
+    const bmsF=bms?.fields||{};
+    S.bvolt=bmsF.battery_voltage??m1?.fields?.battery_voltage??m2?.fields?.battery_voltage??null;
+    S.bsoc=bmsF.soc??null;
+    const charging=bmsF.battery_current!=null&&bmsF.battery_current>0.1;
+    setText('flow-batt-v', S.bvolt!=null?S.bvolt.toFixed(2)+' V':'-');
+    setText('flow-batt-soc', charging?'chg':(S.bsoc!=null?S.bsoc.toFixed(0)+'%':'-'));
+    setText('flow-batt-t','');
     const bar=document.getElementById('batt-fill-bar');
-    if(bar){
-      bar.setAttribute('width', String(S.bsoc/100*192));
-      bar.setAttribute('fill', S.bsoc<20?'url(#g-batt-lo)':'url(#g-batt-hi)');
+    if(bar&&S.bsoc!=null){
+      bar.setAttribute('width',String(S.bsoc/100*192));
+      bar.setAttribute('fill',S.bsoc<20?'url(#g-batt-lo)':'url(#g-batt-hi)');
     }
   } else {
-    setText('flow-batt-v','-');
-    setText('flow-batt-soc','-');
+    S.bvolt=bs?.fields?.battery_voltage
+           ??m1?.fields?.battery_voltage
+           ??m2?.fields?.battery_voltage??null;
+    const charging=S.mptts.some(id=>{
+      const cs=S.current[id]?.fields?.charge_state;
+      return cs===3||cs===4;
+    });
+    S.bsoc=(S.bvolt!=null&&!charging)?lfp4Soc(S.bvolt):null;
+    if(S.bvolt!=null){
+      setText('flow-batt-v',S.bvolt.toFixed(2)+' V');
+      setText('flow-batt-soc',charging?'chg':S.bsoc.toFixed(0)+'%');
+      const bar=document.getElementById('batt-fill-bar');
+      if(bar){
+        bar.setAttribute('width',String(S.bsoc/100*192));
+        bar.setAttribute('fill',S.bsoc<20?'url(#g-batt-lo)':'url(#g-batt-hi)');
+      }
+    } else {
+      setText('flow-batt-v','-'); setText('flow-batt-soc','-');
+    }
+    const temp=bs?.fields?.temperature??null;
+    setText('flow-batt-t',temp!=null?temp.toFixed(1)+'°C':'');
   }
-
-  const temp=bs?.fields?.temperature??null;
-  setText('flow-batt-t', temp!=null?temp.toFixed(1)+'\u00B0C':'');
 
   setLoadNode(1,m1); setLoadNode(2,m2);
 
-  const pv1=pvWatts(m1), pv2=pvWatts(m2);
-  const c1=Math.round(m1?.fields?.charge_state??0), c2=Math.round(m2?.fields?.charge_state??0);
-  const col1=STATES[c1]?.[1]||'#64748b', col2=STATES[c2]?.[1]||'#64748b';
-
-  updatePath('path-pv1',   pv1??0,                          '#f59e0b', 40);
-  updatePath('path-pv2',   pv2??0,                          '#f59e0b', 40);
-  updatePath('path-mppt1', m1?.fields?.charge_current??0,   col1,        4);
-  updatePath('path-mppt2', m2?.fields?.charge_current??0,   col2,        4);
+  const pv1=pvWatts(m1),pv2=pvWatts(m2);
+  const c1=Math.round(m1?.fields?.charge_state??0),c2=Math.round(m2?.fields?.charge_state??0);
+  const col1=STATES[c1]?.[1]||'#64748b',col2=STATES[c2]?.[1]||'#64748b';
+  updatePath('path-pv1',   pv1??0,                        '#f59e0b',40);
+  updatePath('path-pv2',   pv2??0,                        '#f59e0b',40);
+  updatePath('path-mppt1', m1?.fields?.charge_current??0, col1,      4);
+  updatePath('path-mppt2', m2?.fields?.charge_current??0, col2,      4);
 }
 
 function pvWatts(m){
   if(!m) return null;
   if(m.fields?.pv_power!=null) return m.fields.pv_power;
-  // If we have charge_state but no pv_power, it's effectively 0 for the flow diagram
   if('charge_state' in (m.fields||{})) return 0;
   return null;
 }
 
 function setPvNode(idx,m){
   const w=pvWatts(m);
-  setText(`flow-pv${idx}-val`, w!=null ? fmtW(w) : '-');
+  setText(`flow-pv${idx}-val`,w!=null?fmtW(w):'-');
   const volt=m?.fields?.pv_voltage;
-  setText(`flow-pv${idx}-volt`, volt!=null ? volt.toFixed(1)+' V' : '-');
+  setText(`flow-pv${idx}-volt`,volt!=null?volt.toFixed(1)+' V':'-');
   const box=document.getElementById(`pv${idx}-box`);
   if(box){
-    box.style.stroke = (w!=null&&w>1) ? '#d97706' : '';
-    box.style.filter = (w!=null&&w>1) ? 'url(#glow)' : '';
+    box.style.stroke=(w!=null&&w>1)?'#d97706':'';
+    box.style.filter=(w!=null&&w>1)?'url(#glow)':'';
   }
 }
 
 function setLoadNode(idx,m){
-  const lp=m?.fields?.load_power??0;
-  const hasField='load_power' in (m?.fields||{});
   const grp=document.getElementById(`mppt${idx}-load-grp`);
   const pth=document.getElementById(`path-mppt${idx}-load`);
   if(!grp) return;
 
-  // Field absent → device has no load terminal, hide entirely
+  if(S.siteUi?.show_loads===false){
+    grp.style.display='none';
+    if(pth) pth.style.display='none';
+    return;
+  }
+
+  const lp=m?.fields?.load_power??0;
+  const hasField='load_power' in (m?.fields||{});
   if(!hasField){
     grp.style.display='none';
     if(pth) pth.style.display='none';
@@ -699,14 +938,12 @@ function setLoadNode(idx,m){
   const valEl=document.getElementById(`mppt${idx}-load-val`);
 
   if(lp>=1){
-    // Measurable draw - full colour, animated flow
     if(circle) circle.style.opacity='';
     if(valEl)  valEl.style.fill='';
-    setText(`mppt${idx}-load-val`, lp.toFixed(0)+' W');
+    setText(`mppt${idx}-load-val`,lp.toFixed(0)+' W');
     if(pth) pth.style.display='';
-    updatePath(`path-mppt${idx}-load`,lp,'#dc2626',100); // Darker Red for load
-  }else{
-    // Field present but below measurement floor - dim node, static (no animation) line
+    updatePath(`path-mppt${idx}-load`,lp,'#dc2626',100);
+  } else {
     if(circle) circle.style.opacity='0.4';
     if(valEl)  valEl.style.fill='var(--sub)';
     setText(`mppt${idx}-load-val`,'~0 W');
@@ -728,90 +965,76 @@ function updateMpptNode(idx,d){
   const box=document.getElementById(`mppt${idx}-box`);
   if(txt){
     txt.textContent=st[0];
-    // In light mode, always use dark text for the tinted status pill
-    if(isLight()){
-      txt.style.fill='#020617';
-      txt.style.fontWeight='800';
-    } else {
-      txt.style.fill=st[1]==='#374151'?'#9ca3af':'white';
-    }
+    if(isLight()){ txt.style.fill='#020617'; txt.style.fontWeight='800'; }
+    else { txt.style.fill=st[1]==='#374151'?'#9ca3af':'white'; }
   }
   if(bg) bg.setAttribute('fill',st[1]+(isLight()?'66':'33'));
-  if(box) box.style.stroke=st[0]!=='Sleep'?st[1]+'dd':''; // Brighter border
-
-  // MPPT big value: charge current when present, else battery voltage
-  const big = d?.fields?.charge_current!=null
-    ? fv(d,'charge_current',' A')
-    : fv(d,'battery_voltage',' V',2);
-  setText(`mppt${idx}-flow-val`, big);
+  if(box) box.style.stroke=st[0]!=='Sleep'?st[1]+'dd':'';
+  const big=d?.fields?.charge_current!=null
+    ?fv(d,'charge_current',' A')
+    :fv(d,'battery_voltage',' V',2);
+  setText(`mppt${idx}-flow-val`,big);
 }
 
 function updatePath(id,val,col,maxVal){
   const p=document.getElementById(id); if(!p) return;
-  // Ensure the base path is always visible
-  p.style.display=''; 
-  
-  if(val>0.01){ // Trigger animation at even lower power (1W or 0.01A)
+  p.style.display='';
+  if(val>0.01){
     const ratio=Math.min(val/maxVal,1);
-    const dur=(Math.max(0.3, 1.8-ratio*1.5)).toFixed(2);
+    const dur=(Math.max(0.3,1.8-ratio*1.5)).toFixed(2);
     const anim=`dash ${dur}s linear infinite`;
-    if(!p.classList.contains('fl-active') || p.style.stroke!==col || p.style.animation!==anim){
+    if(!p.classList.contains('fl-active')||p.style.stroke!==col||p.style.animation!==anim){
       p.classList.add('fl-active');
-      p.style.stroke=col;
-      p.style.filter='url(#glow)';
-      p.style.animation=anim;
-      p.style.strokeWidth='6'; // Extra thick
+      p.style.stroke=col; p.style.filter='url(#glow)';
+      p.style.animation=anim; p.style.strokeWidth='6';
     }
-  }else if(p.classList.contains('fl-active')){
+  } else if(p.classList.contains('fl-active')){
     p.classList.remove('fl-active');
     p.style.stroke=p.style.filter=p.style.animation=p.style.strokeWidth='';
   }
 }
 
-// ── Cards ──────────────────────────────────────────────────────────────────
-
+// ── Cards ──────────────────────────────────────────────────────────────
 let _cardsKey='';
 
 function renderCards(){
   const cont=document.getElementById('cards');
-  const ids=[...S.mptts,...(S.bsense?[S.bsense]:[])];
-  // Skip rebuild if the data that drives card content hasn't changed
+  const isBmsSite=S.siteUi?.battery_display==='bms';
+  const battId=isBmsSite?S.bmsDevice:S.bsense;
+  const ids=[...S.mptts,...(battId?[battId]:[])];
+
+  const battKey=S.bmsDevice?JSON.stringify(S.battData[S.bmsDevice]?.fields||{}):'';
   const key=ids.map(id=>{
     const f=S.current[id]?.fields||{};
     return `${id}:${f.pv_power??''}:${f.pv_voltage??''}:${f.charge_state??''}:${f.charge_current??''}:${f.battery_voltage??''}:${f.yield_today??''}:${f.temperature??''}:${S.tab}`;
-  }).join('|')+(S.bridge_online?'1':'0');
+  }).join('|')+(S.bridge_online?'1':'0')+battKey;
   if(key===_cardsKey) return;
   _cardsKey=key;
 
-  cont.innerHTML=ids.map((id)=>{
+  cont.innerHTML=ids.map(id=>{
     const d=S.current[id];
     const info=S.devices.find(x=>x.id===id);
     const isM=S.mptts.includes(id);
-    const tabIdx=isM ? S.mptts.indexOf(id) : S.tabDefs.findIndex(t=>t.kind==='battery');
-    const accent=isM?'#ffcc33':'var(--batt)';
+    const isBms=isBmsSite&&id===S.bmsDevice;
+    const tabIdx=isM?S.mptts.indexOf(id):S.tabDefs.findIndex(t=>t.kind==='battery');
     const isActive=S.tab===tabIdx;
+    const accent=isM?'#ffcc33':'var(--batt)';
 
-    // ── MPPT card ──
     if(isM){
       const pvW=pvWatts(d);
-      const hNum = pvW!=null ? fmtW(pvW) : '-';
-      const hUnit= '';  // fmtW already includes unit
-      const hLbl = pvW==null && (d?.fields?.charge_state??0)!==0
-                 ? 'Solar - not in current packet'
-                 : 'Solar Power';
-      const bv   = fv(d,'battery_voltage',' V',2);
-      const cc   = d?.fields?.charge_current!=null ? d.fields.charge_current.toFixed(2)+' A' : '-';
-      const pvv  = d?.fields?.pv_voltage!=null ? d.fields.pv_voltage.toFixed(1)+' V' : '-';
-      const yt   = fmtWh(d?.fields?.yield_today??null);
-      const cs   = Math.round(d?.fields?.charge_state??0);
-      const stLbl= (STATES[cs]||STATES[0])[0];
+      const hNum=pvW!=null?fmtW(pvW):'-';
+      const hLbl=pvW==null&&(d?.fields?.charge_state??0)!==0?'Solar - not in current packet':'Solar Power';
+      const bv=fv(d,'battery_voltage',' V',2);
+      const cc=d?.fields?.charge_current!=null?d.fields.charge_current.toFixed(2)+' A':'-';
+      const pvv=d?.fields?.pv_voltage!=null?d.fields.pv_voltage.toFixed(1)+' V':'-';
+      const yt=fmtWh(d?.fields?.yield_today??null);
+      const cs=Math.round(d?.fields?.charge_state??0);
+      const stLbl=(STATES[cs]||STATES[0])[0];
       return `<div class="card${!info?.online?' s-silent':''}${isActive?' active-tab':''}"
                    onclick="switchTab(${tabIdx})" style="padding-top:22px">
         <div class="card-accent" style="background:${accent}"></div>
-        <div class="c-label">${d.label} <span style="font-weight:400;opacity:0.6;font-size:9px">${stLbl}</span></div>
-        <div class="c-val-group">
-          <span class="c-hero-num" style="color:${accent}">${hNum}</span>
-        </div>
+        <div class="c-label">${d?.label||id} <span style="font-weight:400;opacity:0.6;font-size:9px">${stLbl}</span></div>
+        <div class="c-val-group"><span class="c-hero-num" style="color:${accent}">${hNum}</span></div>
         <div class="c-hero-label">${hLbl}</div>
         <div class="c-grid" style="grid-template-columns:repeat(2,1fr)">
           <div><div class="m-v">${bv}</div><div class="m-l">Battery V</div></div>
@@ -822,17 +1045,47 @@ function renderCards(){
       </div>`;
     }
 
-    // ── Battery Sense card ──
-    // Use shared S.bvolt / S.bsoc (same fallback chain as the flow diagram)
-    const bvDisp  = S.bvolt!=null ? S.bvolt.toFixed(2) : '-';
-    const socDisp = S.bsoc!=null  ? S.bsoc.toFixed(0)+'%' : '-';
-    const tmpDisp = fv(d,'temperature','\u00B0C');
-    const battSrc = d?.fields?.battery_voltage!=null ? d.label
-                  : S.mptts.length>0 ? (S.current[S.mptts[0]]?.label||'MPPT') : '-';
+    if(isBms){
+      const bmsData=S.battData[id]||{};
+      const f=bmsData.fields||{};
+      const soc=f.soc!=null?f.soc.toFixed(0):'-';
+      const socPct=f.soc!=null?Math.max(0,Math.min(100,f.soc)):0;
+      const bv=f.battery_voltage!=null?f.battery_voltage.toFixed(2)+' V':'-';
+      const ba=f.battery_current!=null?f.battery_current.toFixed(1)+' A':'-';
+      const cycles=f.cycles!=null?f.cycles.toFixed(0):'-';
+      const delta=(f.cell_max!=null&&f.cell_min!=null)
+        ?((f.cell_max-f.cell_min)*1000).toFixed(0)+' mV':'-';
+      const barCol=socPct<20?'var(--red)':socPct<50?'var(--amber)':'var(--charge)';
+      return `<div class="card${!info?.online?' s-silent':''}${isActive?' active-tab':''}${S.mptts.length%2===0?' card-wide':''}"
+                   onclick="switchTab(${tabIdx})" style="padding-top:22px">
+        <div class="card-accent" style="background:var(--batt)"></div>
+        <div class="c-label">${bmsData.label||'Battery'}</div>
+        <div class="c-val-group">
+          <span class="c-hero-num" style="color:var(--batt)">${soc}</span>
+          <span class="c-hero-unit">%</span>
+        </div>
+        <div class="c-hero-label">State of Charge</div>
+        <div class="soc-bar-track">
+          <div class="soc-bar-fill" style="width:${socPct}%;background:${barCol}"></div>
+        </div>
+        <div class="c-grid" style="grid-template-columns:repeat(2,1fr)">
+          <div><div class="m-v">${bv}</div><div class="m-l">Voltage</div></div>
+          <div><div class="m-v">${ba}</div><div class="m-l">Current</div></div>
+          <div><div class="m-v">${delta}</div><div class="m-l">Cell Delta</div></div>
+          <div><div class="m-v">${cycles}</div><div class="m-l">Cycles</div></div>
+        </div>
+      </div>`;
+    }
+
+    const bvDisp=S.bvolt!=null?S.bvolt.toFixed(2):'-';
+    const socDisp=S.bsoc!=null?S.bsoc.toFixed(0)+'%':'-';
+    const tmpDisp=fv(d,'temperature','°C');
+    const battSrc=d?.fields?.battery_voltage!=null?d.label
+                 :S.mptts.length>0?(S.current[S.mptts[0]]?.label||'MPPT'):'-';
     return `<div class="card${!info?.online?' s-silent':''}${isActive?' active-tab':''}${S.mptts.length%2===0?' card-wide':''}"
                  onclick="switchTab(${tabIdx})" style="padding-top:22px">
       <div class="card-accent" style="background:${accent}"></div>
-      <div class="c-label">${d.label}</div>
+      <div class="c-label">${d?.label||id}</div>
       <div class="c-val-group">
         <span class="c-hero-num" style="color:${accent}">${bvDisp}</span>
         <span class="c-hero-unit">V</span>
@@ -847,8 +1100,7 @@ function renderCards(){
   }).join('');
 }
 
-// ── Tab switching ──────────────────────────────────────────────────────────
-
+// ── Tab / range switching ──────────────────────────────────────────────
 function switchTab(idx){
   S.tab=idx;
   document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',i===idx));
@@ -858,9 +1110,7 @@ function switchTab(idx){
   if(window.innerWidth<=768) document.body.classList.add('mobile-detail');
 }
 
-function closeMobileDetail(){
-  document.body.classList.remove('mobile-detail');
-}
+function closeMobileDetail(){ document.body.classList.remove('mobile-detail'); }
 
 function switchRange(l){
   S.range=l;
@@ -869,8 +1119,7 @@ function switchRange(l){
   updateCharts();
 }
 
-// ── Charts ─────────────────────────────────────────────────────────────────
-
+// ── Charts ─────────────────────────────────────────────────────────────
 async function updateCharts(){
   if(!S.tabDefs.length) return;
   const def=S.tabDefs[S.tab]; if(!def) return;
@@ -882,20 +1131,21 @@ async function updateCharts(){
     await drawLine(`chart-${S.tab}-c`, id,'charge_current', rng.st,'#10b981',' A');
     await drawLine(`chart-${S.tab}-v`, id,'battery_voltage',rng.st,'#00f2ff',' V');
     await drawLine(`chart-${S.tab}-l`, id,'load_power',     rng.st,'#f97316',wTick);
-  }else if(def.kind==='battery'){
+  } else if(def.kind==='battery'){
     const voltIds=[...(S.bsense?[S.bsense]:[]),...S.mptts];
     await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,' V');
-    if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,'#f97316','\u00B0C');
-    await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,' A',     'Total Charging Current','#10b981');
+    if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,'#f97316','°C');
+    await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,' A','Total Charging Current','#10b981');
     await drawBatteryPower(`chart-${S.tab}-p`,S.mptts,rng.st,wTick,'Total Charging Power','#f59e0b');
-  }else{
-    await drawSum(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,wTick, 'Total Solar Output','#f59e0b');
+  } else {
+    await drawSum(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,wTick,'Total Solar Output','#f59e0b');
     await drawDailyBar(`chart-${S.tab}-bar`);
   }
 }
 
 async function hFetch(dev,field,start,maxPts=500){
-  const r=await fetch(`/api/v1/history?device=${encodeURIComponent(dev)}&field=${field}&start=${start}&max_points=${maxPts}`);
+  const sq=S.activeSite?`&site=${encodeURIComponent(S.activeSite)}`:'';
+  const r=await fetch(`/api/v1/history?device=${encodeURIComponent(dev)}&field=${field}&start=${start}&max_points=${maxPts}${sq}`);
   return r.json();
 }
 
@@ -911,7 +1161,7 @@ const UNIT_FMT={
 };
 function baseOpts(unit){
   const c=chartColors();
-  const tickFn=typeof unit==='function' ? unit : (UNIT_FMT[unit]||(v=>`${v}${unit}`));
+  const tickFn=typeof unit==='function'?unit:(UNIT_FMT[unit]||(v=>`${v}${unit}`));
   return{
     responsive:true, maintainAspectRatio:false,
     plugins:{
@@ -927,8 +1177,8 @@ function baseOpts(unit){
 
 async function drawLine(cid,dev,field,start,col,unit){
   const res=await hFetch(dev,field,start);
-  const canvas=document.getElementById(cid); if(!canvas)return;
-  if(CH[cid])CH[cid].destroy();
+  const canvas=document.getElementById(cid); if(!canvas) return;
+  if(CH[cid]) CH[cid].destroy();
   const ctx=canvas.getContext('2d');
   CH[cid]=new Chart(canvas,{
     type:'line',
@@ -940,7 +1190,7 @@ async function drawLine(cid,dev,field,start,col,unit){
 }
 
 async function drawMulti(cid,ids,field,start,unit){
-  const canvas=document.getElementById(cid); if(!canvas)return;
+  const canvas=document.getElementById(cid); if(!canvas) return;
   const ctx=canvas.getContext('2d');
   const COLS=['#00f2ff','#ffcc33','#10b981','#a78bfa'];
   const datasets=await Promise.all(ids.map(async(id,i)=>{
@@ -951,7 +1201,7 @@ async function drawMulti(cid,ids,field,start,unit){
       borderColor:col, backgroundColor:i===0?grad(ctx,col):'transparent',
       fill:i===0, borderWidth:2, pointRadius:0, tension:0.3};
   }));
-  if(CH[cid])CH[cid].destroy();
+  if(CH[cid]) CH[cid].destroy();
   const c=chartColors();
   CH[cid]=new Chart(canvas,{
     type:'line', data:{datasets},
@@ -961,89 +1211,72 @@ async function drawMulti(cid,ids,field,start,unit){
 }
 
 async function drawSum(cid,ids,field,start,unit,label,col){
-  const canvas=document.getElementById(cid); if(!canvas)return;
+  const canvas=document.getElementById(cid); if(!canvas) return;
   const ctx=canvas.getContext('2d');
   const results=await Promise.all(ids.map(id=>hFetch(id,field,start)));
-  
   const sumMap={};
   results.forEach(res=>{
-    (res.points||[]).forEach(p=>{
-      sumMap[p.t] = (sumMap[p.t]||0) + p.v;
-    });
+    (res.points||[]).forEach(p=>{ sumMap[p.t]=(sumMap[p.t]||0)+p.v; });
   });
-  
-  const sortedTs = Object.keys(sumMap).sort();
-  const data = sortedTs.map(t=>({x:t, y:sumMap[t]}));
-
-  if(CH[cid])CH[cid].destroy();
+  const data=Object.keys(sumMap).sort().map(t=>({x:t,y:sumMap[t]}));
+  if(CH[cid]) CH[cid].destroy();
   CH[cid]=new Chart(canvas,{
     type:'line',
-    data:{datasets:[{label, data, borderColor:col, backgroundColor:grad(ctx,col), fill:true, borderWidth:2, pointRadius:0, tension:0.3}]},
+    data:{datasets:[{label,data,borderColor:col,backgroundColor:grad(ctx,col),fill:true,borderWidth:2,pointRadius:0,tension:0.3}]},
     options:baseOpts(unit)
   });
 }
 
 async function drawBatteryPower(cid,ids,start,unit,label,col){
-  const canvas=document.getElementById(cid); if(!canvas)return;
+  const canvas=document.getElementById(cid); if(!canvas) return;
   const ctx=canvas.getContext('2d');
-
-  // Fetch all currents and one voltage series
-  const [currentResults, voltageRes] = await Promise.all([
-    Promise.all(ids.map(id => hFetch(id, 'charge_current', start))),
-    hFetch(S.bsense || ids[0], 'battery_voltage', start)
+  const[currentResults,voltageRes]=await Promise.all([
+    Promise.all(ids.map(id=>hFetch(id,'charge_current',start))),
+    hFetch(S.bsense||ids[0],'battery_voltage',start)
   ]);
-
-  const vMap = {};
-  (voltageRes.points||[]).forEach(p => { vMap[p.t] = p.v; });
-
-  const sumMap = {};
-  currentResults.forEach(res => {
-    (res.points||[]).forEach(p => {
-      const v = vMap[p.t] || 0;
-      if (v > 0) {
-        sumMap[p.t] = (sumMap[p.t]||0) + (p.v * v);
-      }
+  const vMap={};
+  (voltageRes.points||[]).forEach(p=>{ vMap[p.t]=p.v; });
+  const sumMap={};
+  currentResults.forEach(res=>{
+    (res.points||[]).forEach(p=>{
+      const v=vMap[p.t]||0;
+      if(v>0) sumMap[p.t]=(sumMap[p.t]||0)+(p.v*v);
     });
   });
-
-  const sortedTs = Object.keys(sumMap).sort();
-  const data = sortedTs.map(t => ({x:t, y:Math.round(sumMap[t])}));
-
-  if(CH[cid])CH[cid].destroy();
+  const data=Object.keys(sumMap).sort().map(t=>({x:t,y:Math.round(sumMap[t])}));
+  if(CH[cid]) CH[cid].destroy();
   CH[cid]=new Chart(canvas,{
     type:'line',
-    data:{datasets:[{label, data, borderColor:col, backgroundColor:grad(ctx,col), fill:true, borderWidth:2, pointRadius:0, tension:0.3}]},
+    data:{datasets:[{label,data,borderColor:col,backgroundColor:grad(ctx,col),fill:true,borderWidth:2,pointRadius:0,tension:0.3}]},
     options:baseOpts(unit)
   });
 }
 
-// Range → days for the daily yield bar chart
 const RANGE_DAYS={'1h':1,'6h':1,'24h':1,'7d':7,'30d':30,'All':365};
-
-// Cache responses per day-count for 5 minutes - aggregation query is expensive
 let _dailyCache={};
 
 async function drawDailyBar(cid){
   const days=RANGE_DAYS[S.range]??30;
   const todayOnly=days===1;
   const tzOff=-(new Date().getTimezoneOffset())/60;
-  const cacheKey=todayOnly?`today_${tzOff}`:days;
+  const cacheKey=todayOnly?`today_${tzOff}_${S.activeSite}`:`${days}_${S.activeSite}`;
   const now=Date.now();
   let res;
   const cached=_dailyCache[cacheKey];
-  if(cached && now-cached.ts<5*60*1000){
+  if(cached&&now-cached.ts<5*60*1000){
     res=cached.result;
-  }else{
+  } else {
+    const sq=S.activeSite?`&site=${encodeURIComponent(S.activeSite)}`:'';
     const url=todayOnly
-      ?`/api/v1/daily?days=1&today_only=true&tz_offset=${tzOff}`
-      :`/api/v1/daily?days=${days}&tz_offset=${tzOff}`;
+      ?`/api/v1/daily?days=1&today_only=true&tz_offset=${tzOff}${sq}`
+      :`/api/v1/daily?days=${days}&tz_offset=${tzOff}${sq}`;
     res=await fetch(url).then(r=>r.json());
     _dailyCache[cacheKey]={result:res,ts:now};
   }
-  const canvas=document.getElementById(cid); if(!canvas)return;
+  const canvas=document.getElementById(cid); if(!canvas) return;
   const titleEl=canvas.closest('.chart-card')?.querySelector('.chart-title');
   if(titleEl) titleEl.textContent=days===1?'Today\'s Yield (Wh)':`${days}-Day Yield (Wh)`;
-  if(CH[cid])CH[cid].destroy();
+  if(CH[cid]) CH[cid].destroy();
   const c=chartColors();
   const COLS=['rgba(255,204,51,0.75)','rgba(16,185,129,0.75)'];
   CH[cid]=new Chart(canvas,{
@@ -1067,10 +1300,8 @@ async function drawDailyBar(cid){
   });
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────
-
+// ── Init ───────────────────────────────────────────────────────────────
 (function(){
-  // Range buttons
   const rb=document.getElementById('range-bar');
   RANGES.forEach(r=>{
     const b=document.createElement('button');
@@ -1080,12 +1311,15 @@ async function drawDailyBar(cid){
     rb.appendChild(b);
   });
 
-  // Auto theme: day hours (7–20) = light, night = dark
   const h=new Date().getHours();
   setTheme(h>=7&&h<20?'light':'dark');
 
-  poll();
-  setInterval(poll,5000);
+  document.addEventListener('click',function(e){
+    const dd=document.getElementById('site-dropdown');
+    if(dd&&!dd.contains(e.target)) closeSiteDropdown();
+  });
+
+  initSites();
 })();
 </script>
 </body>

@@ -31,8 +31,28 @@ Both installations write to the same InfluxDB instance (tagged by `site`), serve
 | 8 | Linux BLE bridge for garage Victron MPPTs | ✅ Complete — 16 unit + 4 integration tests |
 | 9 | LiTime BMS support (active BLE poll, `battery` measurement) | ✅ Complete — 41 unit tests + hardware verified (SOC=91% V=13.31V) |
 | 10 | Multi-site API (full test coverage, battery endpoint) | ✅ Complete — 49/49 tests (38 existing + 11 multi-site isolation) |
-| 11 | Dashboard multi-site UI (site selector, BMS widget, topology switching) | Not started |
+| 11 | Dashboard multi-site UI (site selector, BMS widget, topology switching) | ✅ Complete — 49 existing + 18 new UI tests |
 | 12 | Setup.sh multi-site wizard + dashboard device management (add/remove BMS) | Not started |
+
+---
+
+## Phase 11 — Complete
+
+**Goal:** Dashboard shows a site picker landing page when no site is selected; a header dropdown to switch sites; all API calls scoped to the active site; BMS battery card with SOC bar.
+
+**Key additions:**
+- `api/static/index.html`: full rewrite to add site picker, header dropdown, localStorage persistence, site-scoped API calls, BMS card, `show_loads` config respect
+- `api/tests/test_ui.py`: 18 new Phase 11 tests — `TestSitePicker` (7), `TestSiteDropdown` (6), `TestBmsCard` (5); existing tests updated for new title + `_setup_mocks`/`_load` to include `/api/v1/sites` mock and `?site=` query params
+
+**UX design:**
+- Site picker: full-screen cards with architectural SVG illustrations (house+WiFi for ESP32 sites, garage+BLE for BLE sites), live status fetched per site (PV watts or BMS SOC%)
+- Header dropdown `[Site Name ▾]` visible when >1 site; includes checkmark on active site + "All sites →" to return to picker
+- Single site config: picker never shown, dropdown hidden
+- localStorage key `victron_selected_site` — set on selection, cleared on "All sites"
+
+**API changes:** None — all endpoints already had `?site=` support. Dashboard now passes `site=` on every fetch.
+
+**Device classification:** BMS devices excluded from `S.mptts` by checking `S.battData` keys + field heuristic (`soc` present, `charge_state` absent).
 
 ---
 

@@ -54,15 +54,21 @@ def test_ui_visual_verification(page: Page, static_server: str):
         }
     }
 
+    mock_sites = {"sites": [{"id": "home", "label": "Home Solar", "tz_offset_hours": 0,
+                              "bridge": "esp32", "ui": {"show_loads": True, "battery_display": "sense", "mppt_count": 2},
+                              "device_types": ["victron_mppt", "victron_battery_sense"]}]}
+
     # Intercept API calls - now these will be relative to localhost:8099
-    page.route("**/api/v1/devices", lambda route: route.fulfill(json=mock_devices))
-    page.route("**/api/v1/current", lambda route: route.fulfill(json=mock_current))
+    page.route("**/api/v1/sites",   lambda route: route.fulfill(json=mock_sites))
+    page.route("**/api/v1/devices**", lambda route: route.fulfill(json=mock_devices))
+    page.route("**/api/v1/current**", lambda route: route.fulfill(json=mock_current))
     page.route("**/api/v1/history*", lambda route: route.fulfill(json={"points": []}))
     page.route("**/api/v1/daily*", lambda route: route.fulfill(json={"days": []}))
+    page.route("**/api/v1/battery**", lambda route: route.fulfill(json={}))
 
-    # 2. Load Page
+    # 2. Load Page (single site — picker skipped automatically)
     page.goto(static_server)
-    
+
     # Wait for JS to initialize S and run at least one poll
     page.wait_for_function("typeof S !== 'undefined' && S.last !== null", timeout=10000)
     
@@ -150,10 +156,16 @@ def test_ui_battery_power_math_logic(page: Page, static_server: str):
         ]
     }
 
+    mock_sites = {"sites": [{"id": "home", "label": "Home Solar", "tz_offset_hours": 0,
+                              "bridge": "esp32", "ui": {"show_loads": True, "battery_display": "sense", "mppt_count": 2},
+                              "device_types": ["victron_mppt"]}]}
+
     # Intercept specific fields
     def handle_route(route):
         url = route.request.url
-        if "field=charge_current" in url:
+        if "api/v1/sites" in url:
+            route.fulfill(json=mock_sites)
+        elif "field=charge_current" in url:
             route.fulfill(json=mock_history)
         elif "field=battery_voltage" in url:
             route.fulfill(json=mock_voltage)
@@ -162,7 +174,7 @@ def test_ui_battery_power_math_logic(page: Page, static_server: str):
         elif "api/v1/current" in url:
             route.fulfill(json={"m1": {"device": "m1", "label": "MPPT 1", "fields": {"charge_state": 3}}})
         else:
-            route.fulfill(json={"points": [], "devices": {"devices":[]}, "days": {"days":[]}})
+            route.fulfill(json={"points": [], "devices": {"devices": []}, "days": {"days": []}})
 
     page.route("**/api/v1/**", handle_route)
     page.goto(static_server)
