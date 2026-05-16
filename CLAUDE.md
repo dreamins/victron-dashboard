@@ -30,9 +30,25 @@ Both installations write to the same InfluxDB instance (tagged by `site`), serve
 | 7.5 | Historical data migration (backfill `site=home` on all records) | ✅ Complete — 10.9M raw + 27k medium + 2.3k hourly records |
 | 8 | Linux BLE bridge for garage Victron MPPTs | ✅ Complete — 16 unit + 4 integration tests |
 | 9 | LiTime BMS support (active BLE poll, `battery` measurement) | ✅ Complete — 41 unit tests + hardware verified (SOC=91% V=13.31V) |
-| 10 | Multi-site API (full test coverage, battery endpoint) | Not started |
+| 10 | Multi-site API (full test coverage, battery endpoint) | ✅ Complete — 49/49 tests (38 existing + 11 multi-site isolation) |
 | 11 | Dashboard multi-site UI (site selector, BMS widget, topology switching) | Not started |
 | 12 | Setup.sh multi-site wizard + dashboard device management (add/remove BMS) | Not started |
+
+---
+
+## Phase 10 — Complete
+
+**Goal:** API serves multi-site data with full test coverage.
+
+**Result:** 49/49 tests — 38 existing + 11 new multi-site isolation tests.
+
+**Key additions:**
+- `api/tests/sites_fixture.json`: added `test_garage` site (ble bridge, show_loads=false, battery_display=bms)
+- `api/seed_test_data.py`: seeds both `test` and `test_garage` sites (solar + battery measurements)
+- `api/tests/test_api.py`: 11 new Phase 10 tests verifying `/sites` returns both sites, UI metadata correct, and `?site=` filter isolates each site's data
+- `docker-compose.api-test.yml`: standalone test compose for API tests (no external ports, no conflict with production stack)
+
+**Infrastructure note:** standalone compose uses `DOCKER_INFLUXDB_INIT_BUCKET=victron` (not `victron_test`) — the init scripts in `influxdb/init/01_buckets.sh` create `victron_test` as an additional bucket. Using `victron_test` as the init bucket would cause a duplicate-creation error in `01_buckets.sh` (set -e), crashing InfluxDB.
 
 ---
 
