@@ -20,8 +20,8 @@ INFLUX_BUCKET_HOURLY  = os.environ.get("INFLUX_BUCKET_HOURLY", f"{INFLUX_BUCKET}
 TZ_OFFSET_HOURS       = float(os.environ.get("TZ_OFFSET_HOURS", "0"))
 SITES_FILE            = os.environ.get("SITES_FILE", "")
 
-ONLINE_S      = 15
-BRIDGE_S      = 30
+ONLINE_S      = 90   # covers 60s write_interval_s with 30s buffer
+BRIDGE_S      = 120
 SEVEN_DAYS_S  = 7 * 86400
 ONE_YEAR_S    = 365 * 86400
 

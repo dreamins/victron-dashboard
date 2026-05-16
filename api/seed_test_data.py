@@ -2,7 +2,7 @@
 """Seed victron_test bucket with synthetic solar data for Phase 4 testing.
 
 yield_today resets at UTC midnight and increases monotonically through the day.
-Seeded data ends 90s before now so bridge_online/online show False in tests.
+Seeded data ends 150s before now so bridge_online/online show False in tests.
 """
 
 import os
@@ -63,8 +63,8 @@ def main():
     write_api = client.write_api(write_options=SYNCHRONOUS)
 
     now = datetime.now(timezone.utc)
-    # End 90s ago so online/bridge_online show False in tests (thresholds: 15s, 30s)
-    end_time = now - timedelta(seconds=90)
+    # End 150s ago so online/bridge_online show False in tests (thresholds: 90s, 120s)
+    end_time = now - timedelta(seconds=150)
     start_time = end_time - timedelta(hours=args.hours)
     step = timedelta(minutes=args.interval_minutes)
 

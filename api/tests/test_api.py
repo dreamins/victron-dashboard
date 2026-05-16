@@ -44,13 +44,13 @@ def test_devices_known_devices_present():
 
 
 def test_devices_bridge_offline():
-    # Seed data ends 90s ago; BRIDGE threshold is 30s → must be offline
+    # Seed data ends 150s ago; BRIDGE threshold is 120s → must be offline
     r = get("/api/v1/devices")
     assert r.json()["bridge_online"] is False
 
 
 def test_devices_all_offline():
-    # Seed data ends 90s ago; ONLINE threshold is 15s → all devices offline
+    # Seed data ends 150s ago; ONLINE threshold is 90s → all devices offline
     r = get("/api/v1/devices")
     for dev in r.json()["devices"]:
         assert dev["online"] is False, f"{dev['id']} should be offline"
