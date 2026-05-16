@@ -531,9 +531,8 @@ class TestRemainingWh:
 
 # ─── LiTime UUID discovery ─────────────────────────────────────────────────────
 
-def _make_mock_bleak_client(client_instance):
+def _make_mock_bleak_module(client_instance):
     """Return a mock bleak module whose BleakClient() returns client_instance."""
-    import sys
     from unittest.mock import MagicMock
     mock_bleak = MagicMock()
     mock_bleak.BleakClient = MagicMock(return_value=client_instance)
@@ -541,10 +540,10 @@ def _make_mock_bleak_client(client_instance):
 
 
 class TestLiTimeUuidDiscovery:
-    """connect() must discover write/notify UUIDs when they are not already known."""
+    """connect() must probe for write/notify UUIDs when they are not already known."""
 
-    def test_uuids_discovered_when_unknown_on_connect(self):
-        """Address set but no UUIDs → _discover_uuids is called and UUIDs are stored."""
+    def test_uuids_probed_when_unknown_on_connect(self):
+        """Address known but no UUIDs → _probe_device is called and UUIDs are stored."""
         import asyncio
         import sys
         from unittest.mock import AsyncMock, MagicMock, patch
@@ -561,18 +560,18 @@ class TestLiTimeUuidDiscovery:
             mock_client.start_notify = AsyncMock()
             mock_client.services = []
 
-            bms._discover_uuids = AsyncMock(return_value=("w-uuid", "n-uuid"))
+            # _probe_device returns (address, write_uuid, notify_uuid)
+            with patch("drivers.litime._probe_device",
+                       new=AsyncMock(return_value=("AA:BB:CC:DD:EE:FF", "w-uuid", "n-uuid"))):
+                with patch.dict(sys.modules, {"bleak": _make_mock_bleak_module(mock_client)}):
+                    await bms.connect()
 
-            with patch.dict(sys.modules, {"bleak": _make_mock_bleak_client(mock_client)}):
-                await bms.connect()
-
-            bms._discover_uuids.assert_called_once()
             assert bms._write_uuid == "w-uuid"
             assert bms._notify_uuid == "n-uuid"
 
         asyncio.run(_run())
 
-    def test_uuids_not_rediscovered_when_already_known(self):
+    def test_uuids_not_reprobed_when_already_known(self):
         """UUIDs already set (from a prior probe) must not be overwritten on reconnect."""
         import asyncio
         import sys
@@ -590,12 +589,12 @@ class TestLiTimeUuidDiscovery:
             mock_client.start_notify = AsyncMock()
             mock_client.services = []
 
-            bms._discover_uuids = AsyncMock(return_value=(None, None))
+            mock_probe = AsyncMock(return_value=None)
+            with patch("drivers.litime._probe_device", mock_probe):
+                with patch.dict(sys.modules, {"bleak": _make_mock_bleak_module(mock_client)}):
+                    await bms.connect()
 
-            with patch.dict(sys.modules, {"bleak": _make_mock_bleak_client(mock_client)}):
-                await bms.connect()
-
-            bms._discover_uuids.assert_not_called()
+            mock_probe.assert_not_called()
             assert bms._write_uuid == "saved-write"
 
         asyncio.run(_run())

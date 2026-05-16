@@ -189,32 +189,25 @@ class LiTimeBMS:
         self.is_connected = False
         log.warning("LiTime %s disconnected unexpectedly", self.address)
 
-    async def _discover_uuids(self) -> Tuple[Optional[str], Optional[str]]:
-        """Probe characteristic pairs on the already-connected client to find write/notify UUIDs."""
-        client = self._client
-        for service in client.services:
-            notifiable = [c.uuid for c in service.characteristics
-                          if "notify" in c.properties]
-            writable   = [c.uuid for c in service.characteristics
-                          if "write" in c.properties
-                          or "write-without-response" in c.properties]
-            for w_uuid in writable:
-                for n_uuid in notifiable:
-                    if await _try_characteristic_pair(client, w_uuid, n_uuid, timeout=2.5):
-                        log.info("LiTime %s: write=%s notify=%s", self.address, w_uuid, n_uuid)
-                        return w_uuid, n_uuid
-        log.warning("LiTime %s: no characteristic pair responded to c_13 probe", self.address)
-        return None, None
-
     async def connect(self):
         from bleak import BleakClient
 
-        # Auto-discover if we have no address yet (or lost it and need re-probe)
         if not self.address:
+            # No address — full scan + probe to discover device and UUIDs.
             result = await probe_for_litime(adapter=self._adapter)
             if result is None:
                 raise RuntimeError("No LiTime BMS found during BLE probe")
             self.address, self._write_uuid, self._notify_uuid = result
+        elif self._write_uuid is None or self._notify_uuid is None:
+            # Address known (from sites.json) but UUIDs not yet probed.  Run a
+            # dedicated probe connection that disconnects before we create the
+            # main client — avoids triggering a BMS disconnect by writing to
+            # unexpected characteristics on the production connection.
+            result = await _probe_device(self.address, probe_timeout=2.5, adapter=self._adapter)
+            if result is not None:
+                _, self._write_uuid, self._notify_uuid = result
+            else:
+                log.warning("LiTime %s: probe failed — will use fallback UUIDs", self.address)
 
         adapter_kw = {"bluez": {"adapter": self._adapter}} if self._adapter else {}
         self._client = BleakClient(
@@ -226,11 +219,6 @@ class LiTimeBMS:
         await self._client.connect()
         self.is_connected = True
         self._buffer.clear()
-
-        # When the address is known but UUIDs are not (e.g. loaded from sites.json),
-        # probe the connected device to find the right characteristic pair.
-        if self._write_uuid is None or self._notify_uuid is None:
-            self._write_uuid, self._notify_uuid = await self._discover_uuids()
 
         notify_uuid = self._notify_uuid or _fallback_notify(self._client)
         await self._client.start_notify(notify_uuid, self._notification_handler)
