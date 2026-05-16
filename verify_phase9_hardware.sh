@@ -15,7 +15,8 @@ echo "=== Phase 9: hardware verification (LiTime BMS) ==="
 # ── Step 0: Detect best Bluetooth adapter and persist to .env ─────────────────
 echo "Detecting Bluetooth adapters..."
 
-# Bring up every present adapter so hciconfig reports them all.
+# Unblock and bring up every present adapter.
+rfkill unblock bluetooth 2>/dev/null || true
 for hci_path in /sys/class/bluetooth/hci*/; do
     hci_name=$(basename "$hci_path")
     hciconfig "$hci_name" up 2>/dev/null || true
@@ -69,6 +70,10 @@ PYEOF
 
 if [ -n "$BLE_ADAPTER" ]; then
     echo "  Selected adapter: $BLE_ADAPTER"
+    # Power on via BlueZ so the container can find it via D-Bus.
+    (echo "select $BLE_ADAPTER"; sleep 0.5; echo "power on"; sleep 0.5; echo "quit") \
+        | bluetoothctl 2>&1 | grep -v "^$" | sed 's/^/    /' || true
+    sleep 2  # let BlueZ finish registering the adapter
     sed -i '/^BLE_ADAPTER=/d' .env
     echo "BLE_ADAPTER=$BLE_ADAPTER" >> .env
     export BLE_ADAPTER="$BLE_ADAPTER"
