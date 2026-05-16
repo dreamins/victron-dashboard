@@ -22,20 +22,29 @@ echo -e "\n${BOLD}Phase 10 test — Multi-site API${NC}\n"
 
 # ─── Setup ────────────────────────────────────────────────────────────────────
 
-"${COMPOSE[@]}" stop solar-api influxdb 2>/dev/null || true
+# Clean up any previous test run including volumes so InfluxDB re-initialises.
+"${COMPOSE[@]}" down -v 2>/dev/null || true
 sleep 1
 
 "${COMPOSE[@]}" up -d --build influxdb solar-api 2>&1 | grep -v "^time=" || true
 
-# Wait for InfluxDB (up to 120s — init scripts run on first start)
-echo "Waiting for InfluxDB..."
+# Wait for InfluxDB ping (up to 120s — init scripts run on first start).
+echo "Waiting for InfluxDB process..."
 for i in $(seq 1 40); do
     run "${COMPOSE[@]}" exec -T influxdb influx ping && break
     sleep 3
 done
 
-# Wait for API health endpoint (up to 60s)
-echo "Waiting for solar-api..."
+# Wait for victron_test bucket to exist — this confirms init scripts completed.
+echo "Waiting for victron_test bucket (InfluxDB init)..."
+for i in $(seq 1 60); do
+    run "${COMPOSE[@]}" exec -T influxdb \
+        influx bucket list --org home 2>/dev/null | grep -q victron_test && break
+    sleep 3
+done
+
+# Wait for API health endpoint — confirms solar-api can reach InfluxDB (up to 60s).
+echo "Waiting for solar-api health..."
 for i in $(seq 1 30); do
     HEALTH=$(run "${COMPOSE[@]}" exec -T solar-api \
         python -c "import httpx; r=httpx.get('http://localhost:8080/health',timeout=3); print(r.json()['influx_ok'])" 2>/dev/null || true)
@@ -43,9 +52,16 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
-# Seed test data for both sites into victron_test bucket (22h stays within 24h retention)
+if [[ "${HEALTH:-}" != "True" ]]; then
+    echo "ERROR: solar-api did not become healthy (influx_ok != True). Aborting."
+    "${COMPOSE[@]}" logs --tail=20 solar-api 2>/dev/null || true
+    "${COMPOSE[@]}" down -v 2>/dev/null || true
+    exit 1
+fi
+
+# Seed test data for both sites (use `run` not `exec` to avoid host network confusion).
 echo "Seeding test data (test site + test_garage site)..."
-"${COMPOSE[@]}" exec -T solar-api python /app/seed_test_data.py --hours 22 \
+"${COMPOSE[@]}" run --rm --no-deps solar-api python /app/seed_test_data.py --hours 22 \
     2>&1 | grep -v "^time=" || true
 
 sleep 3  # let InfluxDB index the writes
