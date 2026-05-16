@@ -40,5 +40,39 @@
         }
       ]
     }
+    },
+    {
+      "id": "test_garage",
+      "label": "Test Garage",
+      "tz_offset_hours": 0,
+      "bridge": "ble",
+      "ui": {
+        "show_loads": false,
+        "battery_display": "bms",
+        "mppt_count": 2
+      },
+      "devices": [
+        {
+          "id": "test_garage_mppt1",
+          "label": "Garage MPPT 1",
+          "type": "victron_mppt",
+          "mac": "AA:BB:CC:DD:EE:11",
+          "key": "ddccbbaa00112233445566778899ffee"
+        },
+        {
+          "id": "test_garage_mppt2",
+          "label": "Garage MPPT 2",
+          "type": "victron_mppt",
+          "mac": "AA:BB:CC:DD:EE:12",
+          "key": "eeddccbb00112233445566778899ffaa"
+        },
+        {
+          "id": "test_garage_bms",
+          "label": "Garage LiTime",
+          "type": "litime_bms",
+          "mac": "AA:BB:CC:DD:EE:13"
+        }
+      ]
+    }
   ]
 }

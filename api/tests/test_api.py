@@ -364,3 +364,85 @@ def test_battery_unknown_site_returns_empty():
     r = get("/api/v1/battery", site="nonexistent_xyz")
     assert r.status_code == 200
     assert r.json() == {}
+
+
+# ─── Phase 10: multi-site isolation ──────────────────────────────────────────
+
+def test_sites_contains_both_sites():
+    r = get("/api/v1/sites")
+    ids = {s["id"] for s in r.json()["sites"]}
+    assert "test" in ids
+    assert "test_garage" in ids
+
+
+def test_sites_garage_ui_metadata():
+    r = get("/api/v1/sites")
+    garage = next(s for s in r.json()["sites"] if s["id"] == "test_garage")
+    assert garage["bridge"] == "ble"
+    assert garage["ui"]["show_loads"] is False
+    assert garage["ui"]["battery_display"] == "bms"
+    assert garage["ui"]["mppt_count"] == 2
+
+
+def test_sites_test_ui_metadata():
+    r = get("/api/v1/sites")
+    test_site = next(s for s in r.json()["sites"] if s["id"] == "test")
+    assert test_site["bridge"] == "esp32"
+    assert test_site["ui"]["show_loads"] is True
+    assert test_site["ui"]["battery_display"] == "sense"
+
+
+def test_devices_garage_returns_garage_devices():
+    r = get("/api/v1/devices", site="test_garage")
+    assert r.status_code == 200
+    ids = {d["id"] for d in r.json()["devices"]}
+    assert "test_garage_mppt1" in ids
+    assert "test_garage_mppt2" in ids
+
+
+def test_devices_site_isolation_test_excludes_garage():
+    r = get("/api/v1/devices", site="test")
+    ids = {d["id"] for d in r.json()["devices"]}
+    assert "test_garage_mppt1" not in ids
+    assert "test_garage_mppt2" not in ids
+
+
+def test_devices_site_isolation_garage_excludes_test():
+    r = get("/api/v1/devices", site="test_garage")
+    ids = {d["id"] for d in r.json()["devices"]}
+    assert "test_mppt1" not in ids
+    assert "test_battery_sense" not in ids
+
+
+def test_history_garage_has_data():
+    r = get("/api/v1/history", device="test_garage_mppt1", field="pv_power",
+            start="-3d", interval="1h", site="test_garage")
+    assert r.status_code == 200
+    assert len(r.json()["points"]) > 0
+
+
+def test_history_site_isolation_garage_device_wrong_site():
+    # Garage device returns no points when queried under the test site filter.
+    r = get("/api/v1/history", device="test_garage_mppt1", field="pv_power",
+            start="-3d", interval="1h", site="test")
+    assert r.status_code == 200
+    assert r.json()["points"] == []
+
+
+def test_battery_garage_site_returns_garage_bms():
+    r = get("/api/v1/battery", site="test_garage")
+    assert r.status_code == 200
+    body = r.json()
+    assert "test_garage_bms" in body
+    assert "soc" in body["test_garage_bms"]["fields"]
+    assert 0 <= body["test_garage_bms"]["fields"]["soc"] <= 100
+
+
+def test_battery_isolation_test_excludes_garage_bms():
+    r = get("/api/v1/battery", site="test")
+    assert "test_garage_bms" not in r.json()
+
+
+def test_battery_isolation_garage_excludes_test_bms():
+    r = get("/api/v1/battery", site="test_garage")
+    assert "test_bms" not in r.json()

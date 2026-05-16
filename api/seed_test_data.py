@@ -17,11 +17,17 @@ INFLUX_TOKEN  = os.environ["INFLUX_TOKEN"]
 INFLUX_ORG    = os.environ.get("INFLUX_ORG", "home")
 INFLUX_BUCKET = os.environ.get("INFLUX_BUCKET", "victron_test")
 SITE          = os.environ.get("SEED_SITE", "test")
+GARAGE_SITE   = "test_garage"
 
 DEVICES = {
     "test_mppt1": {"label": "Test-MPPT1", "peak_wh": 1500.0, "peak_w": 250.0},
     "test_mppt2": {"label": "Test-MPPT2", "peak_wh": 1000.0, "peak_w": 180.0},
     "test_battery_sense": {"label": "Test-BatterySense"},
+}
+
+GARAGE_DEVICES = {
+    "test_garage_mppt1": {"label": "Garage-MPPT1", "peak_wh": 1200.0, "peak_w": 200.0},
+    "test_garage_mppt2": {"label": "Garage-MPPT2", "peak_wh": 900.0, "peak_w": 150.0},
 }
 
 
@@ -132,6 +138,61 @@ def main():
             else:
                 raise
 
+    # ── Garage site: solar (2 MPPTs) ──────────────────────────────────────────
+    garage_batch: list[Point] = []
+    garage_cumulative = {k: 0.0 for k in GARAGE_DEVICES}
+    t = start_time
+    while t <= end_time:
+        hour = t.hour + t.minute / 60.0
+        sf = _solar_fraction(hour)
+        midnight = t.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_hour = (t - midnight).total_seconds() / 3600.0
+
+        for dev_id, info in GARAGE_DEVICES.items():
+            pv_w = sf * info["peak_w"]
+            yt = _yield_today(day_hour, info["peak_wh"])
+            garage_cumulative[dev_id] += pv_w * args.interval_minutes / 60000.0
+            batt_v = 12.5 + 1.9 * sf
+
+            garage_batch.append(
+                Point("solar")
+                .tag("device", dev_id)
+                .tag("label", info["label"])
+                .tag("site", GARAGE_SITE)
+                .field("pv_power", float(pv_w))
+                .field("pv_voltage", float(17.0 + sf * 2.0))
+                .field("battery_voltage", float(batt_v))
+                .field("charge_current", float(pv_w / max(batt_v, 0.1)))
+                .field("yield_today", float(yt))
+                .field("yield_total", float(garage_cumulative[dev_id]))
+                .field("charge_state", int(5 if sf > 0.1 else 0))
+                .field("charger_error", int(0))
+                .time(t, "s")
+            )
+
+        if len(garage_batch) >= 1000:
+            try:
+                write_api.write(bucket=INFLUX_BUCKET, record=garage_batch)
+                written += len(garage_batch)
+            except Exception as e:
+                if "outside retention policy" in str(e) or "422" in str(e):
+                    pass
+                else:
+                    raise
+            garage_batch.clear()
+
+        t += step
+
+    if garage_batch:
+        try:
+            write_api.write(bucket=INFLUX_BUCKET, record=garage_batch)
+            written += len(garage_batch)
+        except Exception as e:
+            if "outside retention policy" in str(e) or "422" in str(e):
+                pass
+            else:
+                raise
+
     # ── Battery measurement (LiTime BMS) ─────────────────────────────────────
     bms_points: list[Point] = []
     t = start_time
@@ -177,8 +238,53 @@ def main():
             else:
                 raise
 
+    # ── Garage battery measurement (LiTime BMS) ───────────────────────────────
+    garage_bms: list[Point] = []
+    t = start_time
+    while t <= end_time:
+        hour = t.hour + t.minute / 60.0
+        soc  = max(10.0, min(100.0, 75.0 - math.sin(hour / 24.0 * 2.0 * math.pi) * 20.0))
+        batt_v = 12.8 + (soc - 50.0) / 100.0
+        garage_bms.append(
+            Point("battery")
+            .tag("device", "test_garage_bms")
+            .tag("label",  "Garage LiTime")
+            .tag("site",   GARAGE_SITE)
+            .field("soc",             float(soc))
+            .field("soh",             float(98.0))
+            .field("battery_voltage", float(batt_v))
+            .field("battery_current", float(3.0 * math.sin(hour / 12.0 * math.pi)))
+            .field("cycles",          float(42.0))
+            .field("temperature",     float(24.0 + math.sin(hour / 24.0 * 2 * math.pi) * 4.0))
+            .field("cell_min",        float(batt_v / 4.0 - 0.008))
+            .field("cell_max",        float(batt_v / 4.0 + 0.008))
+            .field("cell_avg",        float(batt_v / 4.0))
+            .time(t, "s")
+        )
+        if len(garage_bms) >= 1000:
+            try:
+                write_api.write(bucket=INFLUX_BUCKET, record=garage_bms)
+                written += len(garage_bms)
+            except Exception as e:
+                if "outside retention policy" in str(e) or "422" in str(e):
+                    pass
+                else:
+                    raise
+            garage_bms.clear()
+        t += step
+
+    if garage_bms:
+        try:
+            write_api.write(bucket=INFLUX_BUCKET, record=garage_bms)
+            written += len(garage_bms)
+        except Exception as e:
+            if "outside retention policy" in str(e) or "422" in str(e):
+                pass
+            else:
+                raise
+
     client.close()
-    print(f"Seeded {written} points across {args.hours}h for {len(DEVICES)} devices + test_bms")
+    print(f"Seeded {written} points across {args.hours}h for {len(DEVICES)} + {len(GARAGE_DEVICES)} solar devices + 2 BMS")
     print(f"  bucket: {INFLUX_BUCKET}")
     print(f"  range: {start_time.isoformat()} → {end_time.isoformat()}")
 
