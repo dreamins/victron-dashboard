@@ -329,9 +329,7 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
         # Wait until the passive scanner actually sees the BMS advertising.
         # This guarantees BlueZ has a device object for the MAC before we call
         # Device.Connect() — the same approach BLE apps use: scan first, then connect.
-        if mac and _victron_scanner is not None:
-            # Scan-first only when a Victron scanner is running — avoids BlueZ
-            # "device not found" by ensuring the device is in BlueZ's cache first.
+        if mac:
             log.info("[%s/%s] waiting for BMS to appear in BLE scan...", site_id, dev_id)
             seen = await _wait_for_bms_in_scan(mac, timeout=300.0)
             if seen:
@@ -405,17 +403,20 @@ async def run_production(device_map: Dict[str, Dict], writer: InfluxWriter):
         bms_devices = ready_bms + unconfigured
 
     tasks = []
-    if victron_devices:
-        tasks.append(asyncio.create_task(run_ble_scanner(victron_devices, writer)))
+    # Always start the scanner — even with no Victron devices to record, the scan
+    # populates BlueZ's device cache so BMS pollers can call Device.Connect()
+    # without hanging. The scanner also fires _bms_seen_events for every MAC it
+    # spots, letting BMS pollers skip the blind-connect race condition.
+    tasks.append(asyncio.create_task(run_ble_scanner(victron_devices, writer)))
     for info in bms_devices:
         tasks.append(asyncio.create_task(run_bms_poller(info, writer)))
 
-    if not tasks:
+    if len(tasks) == 1 and not victron_devices and not bms_devices:
         log.warning("No devices configured — nothing to do")
         return
 
-    log.info("Production mode: %d Victron scanner(s), %d BMS poller(s)",
-             1 if victron_devices else 0, len(bms_devices))
+    log.info("Production mode: %d Victron device(s) tracked, %d BMS poller(s)",
+             len(victron_devices), len(bms_devices))
     await asyncio.gather(*tasks)
 
 
