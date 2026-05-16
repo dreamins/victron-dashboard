@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import pathlib
+import signal
 import sys
 import time
 from datetime import datetime, timezone
@@ -417,7 +418,25 @@ async def run_production(device_map: Dict[str, Dict], writer: InfluxWriter):
 
     log.info("Production mode: %d Victron device(s) tracked, %d BMS poller(s)",
              len(victron_devices), len(bms_devices))
-    await asyncio.gather(*tasks)
+
+    # Respond to SIGTERM (docker compose restart/stop) and SIGINT by cancelling
+    # tasks so BMS clients reach their finally blocks and call disconnect() before
+    # exit — prevents stale BlueZ connections that stop the BMS from advertising.
+    loop = asyncio.get_running_loop()
+
+    def _shutdown():
+        log.info("Shutdown signal — cancelling tasks for clean BMS disconnect")
+        for t in tasks:
+            t.cancel()
+
+    loop.add_signal_handler(signal.SIGTERM, _shutdown)
+    loop.add_signal_handler(signal.SIGINT,  _shutdown)
+
+    try:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        loop.remove_signal_handler(signal.SIGTERM)
+        loop.remove_signal_handler(signal.SIGINT)
 
 
 def main():
