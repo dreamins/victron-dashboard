@@ -329,7 +329,9 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
         # Wait until the passive scanner actually sees the BMS advertising.
         # This guarantees BlueZ has a device object for the MAC before we call
         # Device.Connect() — the same approach BLE apps use: scan first, then connect.
-        if mac:
+        if mac and _victron_scanner is not None:
+            # Scan-first only when a Victron scanner is running — avoids BlueZ
+            # "device not found" by ensuring the device is in BlueZ's cache first.
             log.info("[%s/%s] waiting for BMS to appear in BLE scan...", site_id, dev_id)
             seen = await _wait_for_bms_in_scan(mac, timeout=300.0)
             if seen:
