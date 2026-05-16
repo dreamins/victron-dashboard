@@ -12,37 +12,68 @@ fail() { echo "FAIL: $1"; FAIL=$((FAIL+1)); return 1; }
 
 echo "=== Phase 9: hardware verification (LiTime BMS) ==="
 
-# ── Step 0: Detect BT5 adapter and persist to .env ────────────────────────────
+# ── Step 0: Detect best Bluetooth adapter and persist to .env ─────────────────
 echo "Detecting Bluetooth adapters..."
-BT5_ADAPTER=$(python3 - <<'PYEOF'
-import subprocess, sys
+
+# Bring up every present adapter so hciconfig reports them all.
+for hci_path in /sys/class/bluetooth/hci*/; do
+    hci_name=$(basename "$hci_path")
+    hciconfig "$hci_name" up 2>/dev/null || true
+done
+
+BLE_ADAPTER=$(python3 - <<'PYEOF'
+import subprocess, sys, os
+
 try:
     out = subprocess.check_output(["hciconfig", "-a"], text=True, stderr=subprocess.DEVNULL)
 except Exception:
     sys.exit(0)
+
+# Parse all adapters: {name: {manufacturer, hci_ver}}
+adapters = {}
 current = None
 for line in out.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("hci") and ":" in stripped and not stripped.startswith("BD "):
-        current = stripped.split(":")[0]
-    if "HCI Version:" in stripped and current:
-        try:
-            ver = float(stripped.split("HCI Version:")[1].strip().split()[0])
-            if ver >= 5.0:
-                print(current)
-                sys.exit(0)
-        except Exception:
-            pass
+    # New adapter block starts without leading whitespace and matches "hciN:"
+    if line and not line[0].isspace():
+        parts = line.split(":")
+        if parts[0].startswith("hci"):
+            current = parts[0]
+            adapters.setdefault(current, {"manufacturer": "", "hci_ver": 0.0})
+    elif current:
+        s = line.strip()
+        if "Manufacturer:" in s:
+            adapters[current]["manufacturer"] = s
+        if "HCI Version:" in s:
+            try:
+                ver = float(s.split("HCI Version:")[1].strip().split()[0])
+                adapters[current]["hci_ver"] = ver
+            except Exception:
+                pass
+
+print(f"  All adapters: {list(adapters.keys())}", file=sys.stderr)
+for name, info in adapters.items():
+    print(f"    {name}: ver={info['hci_ver']}  {info['manufacturer']}", file=sys.stderr)
+
+# Priority 1: non-Atheros adapter (old dongle is Atheros BT4)
+for name, info in adapters.items():
+    if "Atheros" not in info["manufacturer"]:
+        print(name)
+        sys.exit(0)
+
+# Priority 2: highest HCI version adapter
+if adapters:
+    best = max(adapters.items(), key=lambda x: x[1]["hci_ver"])
+    print(best[0])
 PYEOF
 )
 
-if [ -n "$BT5_ADAPTER" ]; then
-    echo "  Found BT5 adapter: $BT5_ADAPTER"
+if [ -n "$BLE_ADAPTER" ]; then
+    echo "  Selected adapter: $BLE_ADAPTER"
     sed -i '/^BLE_ADAPTER=/d' .env
-    echo "BLE_ADAPTER=$BT5_ADAPTER" >> .env
-    export BLE_ADAPTER="$BT5_ADAPTER"
+    echo "BLE_ADAPTER=$BLE_ADAPTER" >> .env
+    export BLE_ADAPTER="$BLE_ADAPTER"
 else
-    echo "  No BT5+ adapter detected — using system default"
+    echo "  No adapter detected — using system default"
     sed -i '/^BLE_ADAPTER=/d' .env
     export BLE_ADAPTER=""
 fi
