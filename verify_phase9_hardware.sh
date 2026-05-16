@@ -15,6 +15,21 @@ echo "=== Phase 9: hardware verification (LiTime BMS) ==="
 # ── Step 0: Detect best Bluetooth adapter and persist to .env ─────────────────
 echo "Detecting Bluetooth adapters..."
 
+# Install firmware for common BT5 dongles (RTL8761B = TP-Link UB500/ASUS BT500,
+# Broadcom = various others).  No-op if already installed.
+if ! dpkg -l firmware-realtek 2>/dev/null | grep -q '^ii' || \
+   ! dpkg -l firmware-brcm80211 2>/dev/null | grep -q '^ii'; then
+    echo "  Installing BT5 dongle firmware packages..."
+    sudo -n apt-get install -y firmware-realtek firmware-brcm80211 2>/dev/null || \
+        echo "  WARNING: firmware install requires sudo — BT5 dongle may not initialize"
+fi
+
+# Restart bluetoothd so it picks up newly available firmware / USB devices.
+if sudo -n systemctl restart bluetooth 2>/dev/null; then
+    echo "  Bluetooth service restarted"
+    sleep 3
+fi
+
 # Unblock and bring up every present adapter.
 rfkill unblock bluetooth 2>/dev/null || true
 for hci_path in /sys/class/bluetooth/hci*/; do
