@@ -232,7 +232,7 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter):
 
     log.info("BLE scan started — watching %d Victron devices (adapter=%s)",
              len(device_map), BLE_ADAPTER or "default")
-    adapter_kw = {"adapter": BLE_ADAPTER} if BLE_ADAPTER else {}
+    adapter_kw = {"bluez": {"adapter": BLE_ADAPTER}} if BLE_ADAPTER else {}
     scanner = BleakScanner(detection_callback=_callback, **adapter_kw)
     _victron_scanner = scanner
     await scanner.start()

@@ -109,7 +109,7 @@ async def _probe_device(address: str,
     to the c_13 probe, or None if the device is not a LiTime BMS.
     """
     from bleak import BleakClient
-    adapter_kw = {"adapter": adapter} if adapter else {}
+    adapter_kw = {"bluez": {"adapter": adapter}} if adapter else {}
     try:
         async with BleakClient(address, timeout=10.0, **adapter_kw) as client:
             if not client.is_connected:
@@ -143,7 +143,7 @@ async def probe_all_litime(scan_timeout: float = 10.0,
     from bleak import BleakScanner
     log.info("Probing for LiTime BMS devices (scan=%.0fs, probe=%.1fs/device)...",
              scan_timeout, probe_timeout)
-    adapter_kw = {"adapter": adapter} if adapter else {}
+    adapter_kw = {"bluez": {"adapter": adapter}} if adapter else {}
     devices = await BleakScanner.discover(timeout=scan_timeout, **adapter_kw)
     log.info("Found %d BLE device(s), probing each...", len(devices))
     results = []
@@ -199,7 +199,7 @@ class LiTimeBMS:
                 raise RuntimeError("No LiTime BMS found during BLE probe")
             self.address, self._write_uuid, self._notify_uuid = result
 
-        adapter_kw = {"adapter": self._adapter} if self._adapter else {}
+        adapter_kw = {"bluez": {"adapter": self._adapter}} if self._adapter else {}
         self._client = BleakClient(
             self.address,
             timeout=20.0,

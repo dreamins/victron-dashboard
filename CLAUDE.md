@@ -29,10 +29,32 @@ Both installations write to the same InfluxDB instance (tagged by `site`), serve
 | 7 | Multi-site foundation (`sites.json`, `site` tag, `/api/v1/sites`) | ✅ Complete — 35/35 tests |
 | 7.5 | Historical data migration (backfill `site=home` on all records) | ✅ Complete — 10.9M raw + 27k medium + 2.3k hourly records |
 | 8 | Linux BLE bridge for garage Victron MPPTs | ✅ Complete — 16 unit + 4 integration tests |
-| 9 | LiTime BMS support (active BLE poll, `battery` measurement) | Code complete — hardware verify pending |
+| 9 | LiTime BMS support (active BLE poll, `battery` measurement) | ✅ Complete — 41 unit tests + hardware verified (SOC=91% V=13.31V) |
 | 10 | Multi-site API (full test coverage, battery endpoint) | Not started |
 | 11 | Dashboard multi-site UI (site selector, BMS widget, topology switching) | Not started |
 | 12 | Setup.sh multi-site wizard + dashboard device management (add/remove BMS) | Not started |
+
+---
+
+## Phase 9 — Complete
+
+**Goal:** LiTime BMS active BLE poll writes `battery` measurement to InfluxDB with SOC, voltage, current, cell stats, temperature.
+
+**Result:** 41/41 unit tests + hardware verified (SOC=91%, V=13.31V, A=-0.00A via `/api/v1/battery`).
+
+**Hardware facts:**
+- Old Atheros dongle (`hci0`, USB 18:CF:5E:8F:B0:D1): BT 4.1 — cannot see BLE 5.0 extended advertising
+- New Realtek dongle (`hci1`, USB 2357:0604): BT 5.1 — firmware from `firmware-realtek` package
+- `BLE_ADAPTER=hci1` set in `.env` by `verify_phase9_hardware.sh`; passed into container via `docker-compose.yml`
+- `verify_phase9_hardware.sh` handles first-run setup: firmware install, USB soft-replug, bluetooth restart, adapter detection
+
+**Key design points:**
+- Scan-first connect: BMS poller waits for the passive scanner to see the BMS MAC advertising before calling `Device.Connect()` — avoids BlueZ "device not found"
+- Scanner stops before `Device.Connect()`, restarts once BMS is connected (concurrent scan + BMS poll is fine)
+- Discovered MAC persisted to `sites.json` immediately so it survives restarts
+- Exponential backoff reconnect [5, 10, 20, 40s]
+
+**If BMS stops connecting:** See `BMS_TROUBLESHOOTING.md`
 
 ---
 
