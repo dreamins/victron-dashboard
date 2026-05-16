@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test_phase10.sh — Phase 10: Multi-site API
 # Runs all 49 API tests against an isolated test InfluxDB seeded with both sites.
-# Safe to run alongside the production stack (uses --project-name victron-test).
+# Uses docker-compose.api-test.yml (no external ports) — safe alongside production.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,30 +16,28 @@ fail() { echo -e "${RED}[FAIL]${NC} $*"; FAIL=$((FAIL+1)); }
 
 run() { "$@" 2>/dev/null; }
 
-COMPOSE_TEST=(docker compose --project-name victron-test
-    -f docker-compose.yml -f docker-compose.test.yml)
+COMPOSE=(docker compose -f docker-compose.api-test.yml)
 
 echo -e "\n${BOLD}Phase 10 test — Multi-site API${NC}\n"
 
 # ─── Setup ────────────────────────────────────────────────────────────────────
 
-"${COMPOSE_TEST[@]}" stop solar-api influxdb 2>/dev/null || true
-sleep 2
+"${COMPOSE[@]}" stop solar-api influxdb 2>/dev/null || true
+sleep 1
 
-MQTT_BIND_IP=127.0.0.1 "${COMPOSE_TEST[@]}" up -d --build influxdb solar-api \
-    2>&1 | grep -v "^time=" || true
+"${COMPOSE[@]}" up -d --build influxdb solar-api 2>&1 | grep -v "^time=" || true
 
 # Wait for InfluxDB (up to 120s — init scripts run on first start)
 echo "Waiting for InfluxDB..."
 for i in $(seq 1 40); do
-    run "${COMPOSE_TEST[@]}" exec -T influxdb influx ping && break
+    run "${COMPOSE[@]}" exec -T influxdb influx ping && break
     sleep 3
 done
 
 # Wait for API health endpoint (up to 60s)
 echo "Waiting for solar-api..."
 for i in $(seq 1 30); do
-    HEALTH=$(run "${COMPOSE_TEST[@]}" exec -T solar-api \
+    HEALTH=$(run "${COMPOSE[@]}" exec -T solar-api \
         python -c "import httpx; r=httpx.get('http://localhost:8080/health',timeout=3); print(r.json()['influx_ok'])" 2>/dev/null || true)
     [[ "$HEALTH" == "True" ]] && break
     sleep 2
@@ -47,7 +45,7 @@ done
 
 # Seed test data for both sites into victron_test bucket (22h stays within 24h retention)
 echo "Seeding test data (test site + test_garage site)..."
-"${COMPOSE_TEST[@]}" exec -T solar-api python /app/seed_test_data.py --hours 22 \
+"${COMPOSE[@]}" exec -T solar-api python /app/seed_test_data.py --hours 22 \
     2>&1 | grep -v "^time=" || true
 
 sleep 3  # let InfluxDB index the writes
@@ -55,7 +53,7 @@ sleep 3  # let InfluxDB index the writes
 # ─── Pytest ───────────────────────────────────────────────────────────────────
 
 echo ""
-PYTEST_OUTPUT=$("${COMPOSE_TEST[@]}" exec -T solar-api \
+PYTEST_OUTPUT=$("${COMPOSE[@]}" exec -T solar-api \
     python -m pytest /app/tests/test_api.py -v --tb=short 2>&1 | grep -v "^time=" || true)
 echo "$PYTEST_OUTPUT"
 
@@ -68,7 +66,7 @@ FAIL=$((FAIL + PYTEST_FAILED + PYTEST_ERRORS))
 
 # ─── Smoke: both sites in /api/v1/sites ──────────────────────────────────────
 
-SITES=$(run "${COMPOSE_TEST[@]}" exec -T solar-api \
+SITES=$(run "${COMPOSE[@]}" exec -T solar-api \
     python -c "
 import httpx, json
 r = httpx.get('http://localhost:8080/api/v1/sites', timeout=10)
@@ -84,7 +82,7 @@ fi
 
 # ─── Smoke: site isolation — test does not bleed into test_garage ─────────────
 
-ISOLATION=$(run "${COMPOSE_TEST[@]}" exec -T solar-api \
+ISOLATION=$(run "${COMPOSE[@]}" exec -T solar-api \
     python -c "
 import httpx
 r = httpx.get('http://localhost:8080/api/v1/devices', params={'site':'test'}, timeout=10)
@@ -100,7 +98,7 @@ fi
 
 # ─── Smoke: garage BMS visible under site=test_garage ─────────────────────────
 
-GARAGE_BMS=$(run "${COMPOSE_TEST[@]}" exec -T solar-api \
+GARAGE_BMS=$(run "${COMPOSE[@]}" exec -T solar-api \
     python -c "
 import httpx
 r = httpx.get('http://localhost:8080/api/v1/battery', params={'site':'test_garage'}, timeout=10)
@@ -117,15 +115,7 @@ fi
 
 # ─── Cleanup ──────────────────────────────────────────────────────────────────
 
-for meas in solar battery; do
-    run "${COMPOSE_TEST[@]}" exec -T influxdb influx delete \
-        --org home --bucket victron_test \
-        --start 1970-01-01T00:00:00Z \
-        --stop "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --predicate "_measurement=\"${meas}\"" || true
-done
-
-"${COMPOSE_TEST[@]}" stop solar-api influxdb 2>/dev/null || true
+"${COMPOSE[@]}" down -v 2>/dev/null || true
 
 # ─── Result ───────────────────────────────────────────────────────────────────
 
