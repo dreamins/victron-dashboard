@@ -21,6 +21,7 @@ $files = @(
     "api/seed_test_data.py",
     "api/tests/test_api.py",
     "api/tests/sites_fixture.json",
+    "docker-compose.yml",
     "identify_bms.sh",
     "test_phase9.sh",
     "verify_phase9_hardware.sh"

@@ -12,6 +12,41 @@ fail() { echo "FAIL: $1"; FAIL=$((FAIL+1)); return 1; }
 
 echo "=== Phase 9: hardware verification (LiTime BMS) ==="
 
+# ── Step 0: Detect BT5 adapter and persist to .env ────────────────────────────
+echo "Detecting Bluetooth adapters..."
+BT5_ADAPTER=$(python3 - <<'PYEOF'
+import subprocess, sys
+try:
+    out = subprocess.check_output(["hciconfig", "-a"], text=True, stderr=subprocess.DEVNULL)
+except Exception:
+    sys.exit(0)
+current = None
+for line in out.splitlines():
+    stripped = line.strip()
+    if stripped.startswith("hci") and ":" in stripped and not stripped.startswith("BD "):
+        current = stripped.split(":")[0]
+    if "HCI Version:" in stripped and current:
+        try:
+            ver = float(stripped.split("HCI Version:")[1].strip().split()[0])
+            if ver >= 5.0:
+                print(current)
+                sys.exit(0)
+        except Exception:
+            pass
+PYEOF
+)
+
+if [ -n "$BT5_ADAPTER" ]; then
+    echo "  Found BT5 adapter: $BT5_ADAPTER"
+    sed -i '/^BLE_ADAPTER=/d' .env
+    echo "BLE_ADAPTER=$BT5_ADAPTER" >> .env
+    export BLE_ADAPTER="$BT5_ADAPTER"
+else
+    echo "  No BT5+ adapter detected — using system default"
+    sed -i '/^BLE_ADAPTER=/d' .env
+    export BLE_ADAPTER=""
+fi
+
 # ── Step 1: Add litime_main to production sites.json if absent ────────────────
 echo "Checking config/sites.json for litime_main..."
 python3 - <<'EOF'

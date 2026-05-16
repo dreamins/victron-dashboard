@@ -87,6 +87,7 @@ services:
       - INFLUX_ORG=home
       - INFLUX_BUCKET=victron
       - SITES_FILE=/app/sites.json
+      - BLE_ADAPTER=${BLE_ADAPTER:-}
     restart: unless-stopped
 
   oauth2-proxy:

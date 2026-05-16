@@ -34,6 +34,7 @@ INFLUX_ORG       = os.environ.get("INFLUX_ORG", "home")
 INFLUX_BUCKET    = os.environ.get("INFLUX_BUCKET", "")
 SITES_FILE       = os.environ.get("SITES_FILE", "/app/sites.json")
 BLE_FIXTURE_FILE = os.environ.get("BLE_FIXTURE_FILE", "")
+BLE_ADAPTER      = os.environ.get("BLE_ADAPTER", "")  # e.g. "hci1" for a second dongle
 
 VICTRON_MFR_ID = 0x02E1
 _BMS_TYPES     = {"litime_bms"}
@@ -229,8 +230,10 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter):
                          info["site_id"], info["device_id"], n,
                          " ".join(f"{k}={v:.1f}" for k, v in list(fields.items())[:3]))
 
-    log.info("BLE scan started — watching %d Victron devices", len(device_map))
-    scanner = BleakScanner(detection_callback=_callback)
+    log.info("BLE scan started — watching %d Victron devices (adapter=%s)",
+             len(device_map), BLE_ADAPTER or "default")
+    adapter_kw = {"adapter": BLE_ADAPTER} if BLE_ADAPTER else {}
+    scanner = BleakScanner(detection_callback=_callback, **adapter_kw)
     _victron_scanner = scanner
     await scanner.start()
     try:
@@ -279,7 +282,7 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
     site_id = info["site_id"]
     dev_id  = info["device_id"]
     label   = info["label"]
-    bms     = LiTimeBMS(mac)
+    bms     = LiTimeBMS(mac, adapter=BLE_ADAPTER)
     backoff_idx = 0
 
     def _on_data(fields: Dict[str, float]):

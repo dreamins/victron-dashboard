@@ -101,15 +101,17 @@ async def _try_characteristic_pair(client, write_uuid: str, notify_uuid: str,
 
 
 async def _probe_device(address: str,
-                        probe_timeout: float) -> Optional[Tuple[str, str, str]]:
+                        probe_timeout: float,
+                        adapter: str = "") -> Optional[Tuple[str, str, str]]:
     """Connect to one BLE address and probe all writable+notifiable char pairs.
 
     Returns (address, write_uuid, notify_uuid) on the first pair that responds
     to the c_13 probe, or None if the device is not a LiTime BMS.
     """
     from bleak import BleakClient
+    adapter_kw = {"adapter": adapter} if adapter else {}
     try:
-        async with BleakClient(address, timeout=10.0) as client:
+        async with BleakClient(address, timeout=10.0, **adapter_kw) as client:
             if not client.is_connected:
                 return None
             for service in client.services:
@@ -131,8 +133,8 @@ async def _probe_device(address: str,
 
 
 async def probe_all_litime(scan_timeout: float = 10.0,
-                           probe_timeout: float = 2.5
-                           ) -> list:
+                           probe_timeout: float = 2.5,
+                           adapter: str = "") -> list:
     """Scan and probe every nearby BLE device; return ALL that respond to c_13.
 
     Returns a list of (address, write_uuid, notify_uuid) tuples — one per
@@ -141,12 +143,13 @@ async def probe_all_litime(scan_timeout: float = 10.0,
     from bleak import BleakScanner
     log.info("Probing for LiTime BMS devices (scan=%.0fs, probe=%.1fs/device)...",
              scan_timeout, probe_timeout)
-    devices = await BleakScanner.discover(timeout=scan_timeout)
+    adapter_kw = {"adapter": adapter} if adapter else {}
+    devices = await BleakScanner.discover(timeout=scan_timeout, **adapter_kw)
     log.info("Found %d BLE device(s), probing each...", len(devices))
     results = []
     for device in devices:
         log.debug("Probing %s (%s)", device.address, device.name or "?")
-        result = await _probe_device(device.address, probe_timeout)
+        result = await _probe_device(device.address, probe_timeout, adapter)
         if result:
             results.append(result)
     log.info("LiTime probe complete: %d BMS device(s) found", len(results))
@@ -154,10 +157,10 @@ async def probe_all_litime(scan_timeout: float = 10.0,
 
 
 async def probe_for_litime(scan_timeout: float = 10.0,
-                            probe_timeout: float = 2.5
-                            ) -> Optional[Tuple[str, str, str]]:
+                            probe_timeout: float = 2.5,
+                            adapter: str = "") -> Optional[Tuple[str, str, str]]:
     """Return the first LiTime BMS found, or None.  Convenience wrapper around probe_all_litime."""
-    results = await probe_all_litime(scan_timeout, probe_timeout)
+    results = await probe_all_litime(scan_timeout, probe_timeout, adapter)
     return results[0] if results else None
 
 
@@ -170,8 +173,9 @@ class LiTimeBMS:
     The discovered address and characteristic UUIDs are cached for reconnects.
     """
 
-    def __init__(self, address: str = ""):
+    def __init__(self, address: str = "", adapter: str = ""):
         self.address          = address
+        self._adapter         = adapter
         self.on_data_callback = None   # callable(dict[str, float]) or None
         self.is_connected     = False
         self._client          = None
@@ -190,15 +194,17 @@ class LiTimeBMS:
 
         # Auto-discover if we have no address yet (or lost it and need re-probe)
         if not self.address:
-            result = await probe_for_litime()
+            result = await probe_for_litime(adapter=self._adapter)
             if result is None:
                 raise RuntimeError("No LiTime BMS found during BLE probe")
             self.address, self._write_uuid, self._notify_uuid = result
 
+        adapter_kw = {"adapter": self._adapter} if self._adapter else {}
         self._client = BleakClient(
             self.address,
             timeout=20.0,
             disconnected_callback=self._on_disconnect,
+            **adapter_kw,
         )
         await self._client.connect()
         self.is_connected = True
