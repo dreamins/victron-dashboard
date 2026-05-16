@@ -73,6 +73,12 @@ def load_device_map(sites_file: str) -> Dict[str, Dict[str, Any]]:
     result: Dict[str, Dict[str, Any]] = {}
     for site in data.get("sites", []):
         site_id = site["id"]
+        # Only handle BLE-bridge sites — ESP32/MQTT sites are decoded by ble-decoder.
+        bridge = site.get("bridge", "ble")
+        if bridge in ("esp32", "mqtt"):
+            log.debug("Skipping site %s (bridge=%s — handled by ble-decoder)",
+                      site_id, bridge)
+            continue
         for dev in site.get("devices", []):
             mac      = dev.get("mac", "").upper()
             dev_type = dev.get("type", "unknown")

@@ -234,6 +234,25 @@ class TestLoadDeviceMap:
         assert dmap["AA:BB:CC:DD:EE:11"]["site_id"] == "garage"
         assert dmap["AA:BB:CC:DD:EE:11"]["device_id"] == "g1"
 
+    def test_esp32_site_excluded(self, tmp_path):
+        """ESP32/MQTT sites must be skipped — their data comes via ble-decoder, not ble-bridge."""
+        import json
+        from ble_bridge import load_device_map
+        fixture = tmp_path / "sites.json"
+        fixture.write_text(json.dumps({"sites": [
+            {"id": "home", "bridge": "esp32", "devices": [
+                {"id": "h1", "label": "Home MPPT", "type": "victron_mppt",
+                 "mac": "AA:BB:CC:DD:EE:01", "key": "a" * 32}
+            ]},
+            {"id": "garage", "bridge": "ble", "devices": [
+                {"id": "g1", "label": "Garage MPPT", "type": "victron_mppt",
+                 "mac": "AA:BB:CC:DD:EE:11", "key": "b" * 32}
+            ]},
+        ]}))
+        dmap = load_device_map(str(fixture))
+        assert "AA:BB:CC:DD:EE:01" not in dmap  # home ESP32 device excluded
+        assert "AA:BB:CC:DD:EE:11" in dmap       # garage BLE device included
+
     def test_missing_file_returns_empty(self, tmp_path):
         from ble_bridge import load_device_map
         result = load_device_map(str(tmp_path / "nonexistent.json"))
