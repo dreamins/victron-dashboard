@@ -434,3 +434,77 @@ class TestLiTimeParser:
         frame2 = _make_litime_frame(soc=81)
         bms._notification_handler(None, frame1 + frame2)
         assert len(received) == 2
+
+
+# ─── Write throttle ───────────────────────────────────────────────────────────
+
+class TestWriteThrottle:
+    def test_default_write_interval_loaded(self, tmp_path):
+        """Device with no write_interval_s gets the 60s default."""
+        import json
+        from ble_bridge import load_device_map
+        fixture = tmp_path / "sites.json"
+        fixture.write_text(json.dumps({"sites": [{"id": "g", "devices": [
+            {"id": "mppt1", "label": "MPPT 1", "type": "victron_mppt",
+             "mac": "AA:BB:CC:DD:EE:01", "key": "a" * 32}
+        ]}]}))
+        dmap = load_device_map(str(fixture))
+        entry = dmap.get("AA:BB:CC:DD:EE:01")
+        assert entry is not None
+        assert entry["write_interval"] == 60
+
+    def test_custom_write_interval_loaded(self, tmp_path):
+        """Device with write_interval_s=120 is loaded correctly."""
+        import json
+        from ble_bridge import load_device_map
+        fixture = tmp_path / "sites.json"
+        fixture.write_text(json.dumps({"sites": [{"id": "g", "devices": [
+            {"id": "mppt1", "label": "MPPT 1", "type": "victron_mppt",
+             "mac": "AA:BB:CC:DD:EE:01", "key": "a" * 32, "write_interval_s": 120}
+        ]}]}))
+        dmap = load_device_map(str(fixture))
+        entry = dmap.get("AA:BB:CC:DD:EE:01")
+        assert entry["write_interval"] == 120
+
+
+# ─── BMS remaining_wh ─────────────────────────────────────────────────────────
+
+class TestRemainingWh:
+    def test_capacity_ah_loaded_from_config(self, tmp_path):
+        """capacity_ah is loaded from device config into the device map."""
+        import json
+        from ble_bridge import load_device_map
+        fixture = tmp_path / "sites.json"
+        fixture.write_text(json.dumps({"sites": [{"id": "g", "devices": [
+            {"id": "bms1", "label": "BMS", "type": "litime_bms",
+             "mac": "AA:BB:CC:DD:EE:05", "capacity_ah": 100}
+        ]}]}))
+        dmap = load_device_map(str(fixture))
+        entry = list(dmap.values())[0]
+        assert entry["capacity_ah"] == 100
+
+    def test_no_capacity_ah_is_none(self, tmp_path):
+        """capacity_ah is None when not in config."""
+        import json
+        from ble_bridge import load_device_map
+        fixture = tmp_path / "sites.json"
+        fixture.write_text(json.dumps({"sites": [{"id": "g", "devices": [
+            {"id": "bms1", "label": "BMS", "type": "litime_bms",
+             "mac": "AA:BB:CC:DD:EE:05"}
+        ]}]}))
+        dmap = load_device_map(str(fixture))
+        entry = list(dmap.values())[0]
+        assert entry["capacity_ah"] is None
+
+    def test_remaining_wh_calculation(self):
+        """remaining_wh = soc/100 * capacity_ah * battery_voltage."""
+        from drivers.litime import parse_litime_frame
+        frame = _make_litime_frame(soc=91, voltage_mv=13310)
+        fields = parse_litime_frame(frame)
+        capacity_ah = 100
+        fields["remaining_wh"] = round(
+            fields["soc"] / 100.0 * capacity_ah * fields["battery_voltage"], 0
+        )
+        # 91% * 100Ah * 13.31V = 1211 Wh
+        expected = round(91 / 100.0 * 100 * 13.31, 0)
+        assert fields["remaining_wh"] == pytest.approx(expected, abs=1)

@@ -1055,6 +1055,7 @@ function renderCards(){
       const cycles=f.cycles!=null?f.cycles.toFixed(0):'-';
       const delta=(f.cell_max!=null&&f.cell_min!=null)
         ?((f.cell_max-f.cell_min)*1000).toFixed(0)+' mV':'-';
+      const rwh=f.remaining_wh!=null?Math.round(f.remaining_wh)+' Wh':null;
       const barCol=socPct<20?'var(--red)':socPct<50?'var(--amber)':'var(--charge)';
       return `<div class="card${!info?.online?' s-silent':''}${isActive?' active-tab':''}${S.mptts.length%2===0?' card-wide':''}"
                    onclick="switchTab(${tabIdx})" style="padding-top:22px">
@@ -1064,7 +1065,7 @@ function renderCards(){
           <span class="c-hero-num" style="color:var(--batt)">${soc}</span>
           <span class="c-hero-unit">%</span>
         </div>
-        <div class="c-hero-label">State of Charge</div>
+        <div class="c-hero-label">State of Charge${rwh?` &nbsp;·&nbsp; <span style="color:var(--text)">${rwh}</span> left`:''}</div>
         <div class="soc-bar-track">
           <div class="soc-bar-fill" style="width:${socPct}%;background:${barCol}"></div>
         </div>

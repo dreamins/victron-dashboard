@@ -13,6 +13,7 @@ import logging
 import os
 import pathlib
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
@@ -36,9 +37,10 @@ SITES_FILE       = os.environ.get("SITES_FILE", "/app/sites.json")
 BLE_FIXTURE_FILE = os.environ.get("BLE_FIXTURE_FILE", "")
 BLE_ADAPTER      = os.environ.get("BLE_ADAPTER", "")  # e.g. "hci1" for a second dongle
 
-VICTRON_MFR_ID = 0x02E1
-_BMS_TYPES     = {"litime_bms"}
-_BMS_BACKOFF   = [5, 10, 20, 40]   # seconds; capped at last entry
+VICTRON_MFR_ID    = 0x02E1
+_BMS_TYPES        = {"litime_bms"}
+_BMS_BACKOFF      = [5, 10, 20, 40]   # seconds; capped at last entry
+_DEFAULT_WRITE_S  = 60                 # write each Victron device at most once per minute
 
 
 def _persist_mac(sites_file: str, site_id: str, device_id: str, mac: str):
@@ -82,12 +84,14 @@ def load_device_map(sites_file: str) -> Dict[str, Dict[str, Any]]:
                 continue
             key = mac if mac else f"_{site_id}_{dev['id']}"
             result[key] = {
-                "site_id":   site_id,
-                "device_id": dev["id"],
-                "label":     dev.get("label", dev["id"]),
-                "key":       dev.get("key", ""),
-                "type":      dev_type,
-                "mac":       mac,
+                "site_id":        site_id,
+                "device_id":      dev["id"],
+                "label":          dev.get("label", dev["id"]),
+                "key":            dev.get("key", ""),
+                "type":           dev_type,
+                "mac":            mac,
+                "write_interval": int(dev.get("write_interval_s", _DEFAULT_WRITE_S)),
+                "capacity_ah":    dev.get("capacity_ah"),  # optional, for remaining_wh
             }
     log.info("Loaded %d devices from %s", len(result), sites_file)
     return result
@@ -171,6 +175,9 @@ def run_fixture_mode(fixture_file: str, device_map: Dict[str, Dict], writer: Inf
 # org.bluez.Error.InProgress (BlueZ cannot connect while discovery is active).
 _victron_scanner = None
 
+# MAC → monotonic timestamp of last InfluxDB write (throttle per device).
+_last_written: Dict[str, float] = {}
+
 # MAC → Event: fires when the passive scanner first sees the MAC advertising.
 # BMS pollers register here so connect() only runs after the device is in BlueZ's cache.
 _bms_seen_events: Dict[str, asyncio.Event] = {}
@@ -215,6 +222,13 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter):
         if not info:
             log.debug("Unknown Victron MAC: %s", mac)
             return
+
+        # Throttle writes: only record once per write_interval seconds per device.
+        interval = info.get("write_interval", _DEFAULT_WRITE_S)
+        now_mono = time.monotonic()
+        if now_mono - _last_written.get(mac, 0.0) < interval:
+            return
+
         raw_bytes = adv_data.manufacturer_data[VICTRON_MFR_ID]
         fields    = decode_advertisement(raw_bytes, info["key"])
         if not fields:
@@ -223,11 +237,12 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter):
         pt = _make_point(info["device_id"], info["label"], info["site_id"], ts, fields)
         if pt:
             writer.write(pt)
+            _last_written[mac] = now_mono
             seen[mac] = seen.get(mac, 0) + 1
             n = seen[mac]
-            if n == 1 or n % 300 == 0:
-                log.info("[%s/%s] %d points (latest: %s)",
-                         info["site_id"], info["device_id"], n,
+            if n == 1 or n % 10 == 0:
+                log.info("[%s/%s] %d points written (interval=%ds, latest: %s)",
+                         info["site_id"], info["device_id"], n, interval,
                          " ".join(f"{k}={v:.1f}" for k, v in list(fields.items())[:3]))
 
     log.info("BLE scan started — watching %d Victron devices (adapter=%s)",
@@ -278,21 +293,27 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
     """
     from drivers.litime import LiTimeBMS
 
-    mac     = info["mac"]
-    site_id = info["site_id"]
-    dev_id  = info["device_id"]
-    label   = info["label"]
-    bms     = LiTimeBMS(mac, adapter=BLE_ADAPTER)
+    mac         = info["mac"]
+    site_id     = info["site_id"]
+    dev_id      = info["device_id"]
+    label       = info["label"]
+    capacity_ah = info.get("capacity_ah")
+    bms         = LiTimeBMS(mac, adapter=BLE_ADAPTER)
     backoff_idx = 0
 
     def _on_data(fields: Dict[str, float]):
+        if capacity_ah is not None:
+            soc     = fields.get("soc", 0)
+            voltage = fields.get("battery_voltage", 0)
+            fields["remaining_wh"] = round(soc / 100.0 * capacity_ah * voltage, 0)
         ts = datetime.now(timezone.utc)
         pt = _make_battery_point(dev_id, label, site_id, ts, fields)
         if pt:
             writer.write(pt)
-            log.info("[%s/%s] battery SOC=%.0f%% V=%.2fV A=%.2fA",
+            rwh = f" ~{fields['remaining_wh']:.0f}Wh" if "remaining_wh" in fields else ""
+            log.info("[%s/%s] battery SOC=%.0f%%%s V=%.2fV A=%.2fA",
                      site_id, dev_id,
-                     fields.get("soc", 0),
+                     fields.get("soc", 0), rwh,
                      fields.get("battery_voltage", 0),
                      fields.get("battery_current", 0))
 
