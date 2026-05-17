@@ -326,7 +326,8 @@ import struct as _struct
 
 
 def _make_litime_frame(voltage_mv=13200, current_ma=-2500, soc=85, soh=99,
-                       cycles=15, temp=22, cell_mv=3300, bad_checksum=False):
+                       cycles=15, temp=22, cell_mv=3300, capacity_ah=100,
+                       bad_checksum=False):
     """Build a synthetic 105-byte c_13 response frame for testing."""
     frame = bytearray(105)
     frame[0] = 0x00
@@ -341,6 +342,11 @@ def _make_litime_frame(voltage_mv=13200, current_ma=-2500, soc=85, soh=99,
         _struct.pack_into('<H', frame, 16 + i * 2, cell_mv)
     _struct.pack_into('<i', frame, 48, current_ma)
     frame[52] = temp & 0xFF
+    # [62:64] remaining charge, [64:66] full charge capacity (5 mAh/unit)
+    full_ah     = capacity_ah * (soh / 100.0)
+    remaining_ah = full_ah * (soc / 100.0)
+    _struct.pack_into('<H', frame, 62, round(remaining_ah / 0.005))
+    _struct.pack_into('<H', frame, 64, round(full_ah / 0.005))
     _struct.pack_into('<H', frame, 90, soc)
     _struct.pack_into('<H', frame, 92, soh)
     _struct.pack_into('<H', frame, 96, cycles)
@@ -515,18 +521,32 @@ class TestRemainingWh:
         entry = list(dmap.values())[0]
         assert entry["capacity_ah"] is None
 
-    def test_remaining_wh_calculation(self):
-        """remaining_wh = soc/100 * capacity_ah * battery_voltage."""
+    def test_remaining_charge_in_frame(self):
+        """Frame bytes [62:64] decoded as remaining_charge_ah at 5 mAh/unit."""
         from drivers.litime import parse_litime_frame
-        frame = _make_litime_frame(soc=91, voltage_mv=13310)
+        # 100Ah design, 99% SOH → full=99Ah; 85% SOC → remaining≈84.15Ah
+        frame = _make_litime_frame(soc=85, soh=99, capacity_ah=100)
         fields = parse_litime_frame(frame)
-        capacity_ah = 100
-        fields["remaining_wh"] = round(
-            fields["soc"] / 100.0 * capacity_ah * fields["battery_voltage"], 0
-        )
-        # 91% * 100Ah * 13.31V = 1211 Wh
-        expected = round(91 / 100.0 * 100 * 13.31, 0)
-        assert fields["remaining_wh"] == pytest.approx(expected, abs=1)
+        assert "remaining_charge_ah" in fields
+        assert fields["remaining_charge_ah"] == pytest.approx(84.15, abs=0.1)
+
+    def test_design_capacity_derived_from_frame(self):
+        """design_capacity_ah = full_charge/(SOH/100) recovers the rated 100Ah."""
+        from drivers.litime import parse_litime_frame
+        frame = _make_litime_frame(soc=91, soh=103, capacity_ah=100)
+        fields = parse_litime_frame(frame)
+        assert fields["design_capacity_ah"] == pytest.approx(100.0, abs=0.5)
+
+    def test_remaining_wh_uses_frame_charge(self):
+        """remaining_wh = remaining_charge_ah * voltage (BMS-reported, no manual config)."""
+        from drivers.litime import parse_litime_frame
+        # soh=99 → full=99Ah; soc=91% → remaining=90.09Ah
+        frame = _make_litime_frame(soc=91, soh=99, voltage_mv=13310, capacity_ah=100)
+        fields = parse_litime_frame(frame)
+        voltage = fields["battery_voltage"]
+        fields["remaining_wh"] = round(fields["remaining_charge_ah"] * voltage, 0)
+        expected = round(100 * 0.99 * 0.91 * 13.31, 0)  # 90.09Ah * 13.31V
+        assert fields["remaining_wh"] == pytest.approx(expected, abs=5)
 
 
 # ─── LiTime UUID discovery ─────────────────────────────────────────────────────

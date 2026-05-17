@@ -2,7 +2,7 @@
 
 A self-hosted solar energy dashboard for Victron BLE devices — no cloud, no subscriptions, no Victron servers. Monitors multiple installations from a single dashboard with live energy flow, historical charts, and BMS battery tracking.
 
-> **Tested with:** 2× SmartSolar MPPT + 1× Smart Battery Sense (ESP32 bridge) · 2× SmartSolar 150/75 MPPT + LiTime BMS (direct Linux BLE)
+> **Tested with:** 2× SmartSolar MPPT + 1× Smart Battery Sense (ESP32 bridge) · 2× SmartSolar MPPT + LiTime BMS (direct Linux BLE)
 
 ---
 
@@ -54,7 +54,7 @@ Two bridge paths write to the same InfluxDB instance, tagged by `site`:
    → MQTT: victron/home/raw → ble-decoder → InfluxDB  site=home
 
 ── Garage installation ────────────────────────────────────────────
- Victron 150/75 MPPT × 2 (BLE passive)
+ Victron SmartSolar MPPT × 2 (BLE passive)
    → ble-bridge (bleak, Linux hci adapter) → InfluxDB  site=garage
  LiTime BMS (BLE active poll every 5 s)
    → ble-bridge → InfluxDB  battery measurement

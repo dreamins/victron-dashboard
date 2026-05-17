@@ -55,16 +55,25 @@ def parse_litime_frame(data: bytes) -> Optional[Dict[str, float]]:
     cell_max = max(active) if active else 0.0
     cell_avg = sum(active) / len(active) if active else 0.0
 
+    # [62:64] = remaining charge, [64:66] = full charge capacity; unit = 5 mAh each.
+    # design_capacity_ah = full_charge / (soh/100) — derived, no manual config needed.
+    _AH_SCALE = 0.005
+    remaining_charge_ah  = u16(62) * _AH_SCALE
+    full_charge_ah       = u16(64) * _AH_SCALE
+    design_capacity_ah   = full_charge_ah / (soh / 100.0) if soh > 0 else full_charge_ah
+
     return {
-        "battery_voltage": voltage,
-        "battery_current": current,
-        "soc":             soc,
-        "soh":             soh,
-        "cycles":          cycles,
-        "temperature":     temp,
-        "cell_min":        cell_min,
-        "cell_max":        cell_max,
-        "cell_avg":        cell_avg,
+        "battery_voltage":    voltage,
+        "battery_current":    current,
+        "soc":                soc,
+        "soh":                soh,
+        "cycles":             cycles,
+        "temperature":        temp,
+        "cell_min":           cell_min,
+        "cell_max":           cell_max,
+        "cell_avg":           cell_avg,
+        "remaining_charge_ah": round(remaining_charge_ah, 2),
+        "design_capacity_ah":  round(design_capacity_ah, 1),
     }
 
 

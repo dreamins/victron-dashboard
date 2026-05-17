@@ -309,9 +309,12 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
     backoff_idx = 0
 
     def _on_data(fields: Dict[str, float]):
-        if capacity_ah is not None:
-            soc     = fields.get("soc", 0)
-            voltage = fields.get("battery_voltage", 0)
+        voltage = fields.get("battery_voltage", 0)
+        if "remaining_charge_ah" in fields:
+            # Use BMS-reported remaining charge (bytes [62:64] of c_13 frame, 5 mAh/unit)
+            fields["remaining_wh"] = round(fields["remaining_charge_ah"] * voltage, 0)
+        elif capacity_ah is not None:
+            soc = fields.get("soc", 0)
             fields["remaining_wh"] = round(soc / 100.0 * capacity_ah * voltage, 0)
         ts = datetime.now(timezone.utc)
         pt = _make_battery_point(dev_id, label, site_id, ts, fields)
