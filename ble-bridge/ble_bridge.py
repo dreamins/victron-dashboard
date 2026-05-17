@@ -117,9 +117,29 @@ class BridgeController:
         for info in bms_devs:
             key = self._bms_key(info)
             self._bms_tasks[key] = asyncio.create_task(run_bms_poller(info, self.writer))
+        self._watchdog_task = asyncio.create_task(self._scanner_watchdog())
 
         log.info("BridgeController started: %d Victron device(s), %d BMS poller(s)",
                  len(victron), len(bms_devs))
+
+    async def _scanner_watchdog(self):
+        """Restart the Victron scanner task if it exits unexpectedly.
+
+        BlueZ can crash StartDiscovery with a transient error, killing the scanner task.
+        Without a watchdog the BMS pollers fall into a tight loop (_victron_scanner is
+        None → _wait_for_bms_in_scan returns False immediately → continue → repeat) and
+        the BMS stays offline indefinitely.  This watchdog checks every 30 s and respawns.
+        """
+        while True:
+            await asyncio.sleep(30.0)
+            t = self._scanner_task
+            if t is not None and t.done():
+                exc = t.exception() if not t.cancelled() else None
+                log.error("Scanner task exited unexpectedly (exc=%s) — restarting in 10s", exc)
+                await asyncio.sleep(10.0)
+                victron = self._victron_subset(self.device_map)
+                self._scanner_task = asyncio.create_task(run_ble_scanner(victron, self.writer))
+                log.info("Scanner task restarted by watchdog")
 
     async def reload(self):
         """Re-read sites.json and diff-apply changes to running tasks."""
@@ -564,9 +584,19 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
             if seen:
                 log.info("[%s/%s] BMS detected, connecting now", site_id, dev_id)
             else:
-                log.warning("[%s/%s] BMS not seen after 5 min — may be off or connected "
-                            "to another device; will keep waiting", site_id, dev_id)
-                continue  # loop back and wait again rather than failing immediately
+                # Do not continue-loop here: that causes an infinite tight loop when
+                # _victron_scanner is None (scanner crashed), starving the event loop
+                # and keeping the BMS offline forever.  Instead fall through to attempt
+                # a blind connect — BlueZ may still have the device in its cache and
+                # succeed without a fresh advertisement.
+                if _victron_scanner is None:
+                    # Scanner is down; add a sleep to avoid spinning at full speed.
+                    log.warning("[%s/%s] scanner is down, BMS not seen — sleeping 30s "
+                                "then attempting blind connect", site_id, dev_id)
+                    await asyncio.sleep(30.0)
+                else:
+                    log.warning("[%s/%s] BMS not seen in scan after 5 min — "
+                                "attempting connect anyway", site_id, dev_id)
 
         connected_ok = False
         scan_was_running = False
@@ -634,6 +664,8 @@ async def run_production(device_map: Dict[str, Any], writer: InfluxWriter):
             t.cancel()
         if controller._scanner_task and not controller._scanner_task.done():
             controller._scanner_task.cancel()
+        if getattr(controller, "_watchdog_task", None) and not controller._watchdog_task.done():
+            controller._watchdog_task.cancel()
 
     loop.add_signal_handler(signal.SIGTERM, _shutdown)
     loop.add_signal_handler(signal.SIGINT,  _shutdown)
@@ -652,6 +684,8 @@ async def run_production(device_map: Dict[str, Any], writer: InfluxWriter):
         remaining = list(controller._bms_tasks.values())
         if controller._scanner_task:
             remaining.append(controller._scanner_task)
+        if getattr(controller, "_watchdog_task", None):
+            remaining.append(controller._watchdog_task)
         for t in remaining:
             if not t.done():
                 t.cancel()
