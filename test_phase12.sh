@@ -461,12 +461,17 @@ if $SKIP_SCAN; then
     warn "T15: BLE scan test SKIPPED (SKIP_SCAN=true)"
 elif [ -n "$BLE_SITE" ] && [ -n "$API_CONTAINER" ]; then
     # Wait for BMS to finish initial UUID probe and start actively polling.
-    # probe_all_litime (called by BMS poller on first connect) takes ~20s;
-    # triggering scan_bms before it finishes causes BlueZ InProgress errors.
-    info "T15: Waiting for BMS to start polling (UUID probe takes ~20s)..."
+    # IMPORTANT: Record current log length first so we only watch NEW entries.
+    # T10/T12 reloads restart the BMS poller; we must wait for it to reconnect
+    # AFTER those reloads, not just find an older SOC entry in log history.
+    # Triggering scan_bms while the poller is mid-probe (BlueZ connecting)
+    # causes InProgress errors and HTTP502 from the scan endpoint.
+    LOG_OFFSET=$(docker logs "$BLE_CONTAINER" 2>&1 | wc -l)
+    info "T15: Waiting for BMS to resume polling after T12 reload (UUID probe takes ~20s)..."
     BMS_READY=false
     for i in $(seq 1 90); do
-        docker logs "$BLE_CONTAINER" 2>&1 | grep -q "battery SOC=" && BMS_READY=true && break
+        NEW_SOC=$(docker logs "$BLE_CONTAINER" 2>&1 | tail -n +"$((LOG_OFFSET + 1))" | grep -c "battery SOC=" || true)
+        [ "$NEW_SOC" -gt "0" ] && BMS_READY=true && break
         sleep 1
     done
     if ! $BMS_READY; then
