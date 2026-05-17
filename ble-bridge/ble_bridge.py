@@ -201,7 +201,7 @@ class BridgeController:
                 try:
                     found = await asyncio.wait_for(
                         probe_all_litime(scan_timeout=15.0, probe_timeout=3.0, adapter=BLE_ADAPTER),
-                        timeout=55.0,
+                        timeout=70.0,
                     )
                     break
                 except Exception as _exc:

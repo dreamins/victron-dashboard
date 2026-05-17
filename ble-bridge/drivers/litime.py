@@ -122,7 +122,7 @@ async def _probe_device(address: str,
     from bleak import BleakClient
     adapter_kw = {"bluez": {"adapter": adapter}} if adapter else {}
     try:
-        async with BleakClient(address, timeout=5.0, **adapter_kw) as client:
+        async with BleakClient(address, timeout=10.0, **adapter_kw) as client:
             if not client.is_connected:
                 return None
             for service in client.services:

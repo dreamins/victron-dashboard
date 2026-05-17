@@ -480,7 +480,7 @@ import urllib.request, json
 try:
     r = urllib.request.urlopen(
         'http://localhost:8080/api/v1/scan/bms?site=${BLE_SITE}',
-        timeout=110
+        timeout=145
     )
     data = json.loads(r.read())
     print(json.dumps(data))

@@ -498,7 +498,7 @@ async def scan_bms(site: str = Query(...)):
         raise HTTPException(400, "site does not use a BLE bridge — scan not available")
     if not BLE_BRIDGE_URL:
         raise HTTPException(503, "BLE_BRIDGE_URL not configured")
-    async with httpx.AsyncClient(timeout=100.0) as client:
+    async with httpx.AsyncClient(timeout=130.0) as client:
         try:
             resp = await client.post(f"{BLE_BRIDGE_URL}/scan-bms")
             resp.raise_for_status()
