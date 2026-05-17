@@ -32,11 +32,11 @@ Both installations write to the same InfluxDB instance (tagged by `site`), serve
 | 9 | LiTime BMS support (active BLE poll, `battery` measurement) | ✅ Complete — 41 unit tests + hardware verified (SOC=91% V=13.31V) |
 | 10 | Multi-site API (full test coverage, battery endpoint) | ✅ Complete — 49/49 tests (38 existing + 11 multi-site isolation) |
 | 11 | Dashboard multi-site UI (site selector, BMS widget, topology switching) | ✅ Complete — 49 existing + 18 new UI tests |
-| 12 | Setup.sh multi-site wizard + dashboard device management (add/remove BMS) | In progress |
+| 12 | Setup.sh multi-site wizard + dashboard device management (add/remove BMS) | ✅ Complete — 20 new tests (5 api_server + 15 device_mgmt) |
 
 ---
 
-## Phase 12 — In Progress
+## Phase 12 — Complete
 
 **Goal:** One-command setup wizard + dashboard device management UI (add/remove BMS with live probe preview).
 
