@@ -122,7 +122,7 @@ async def _probe_device(address: str,
     from bleak import BleakClient
     adapter_kw = {"bluez": {"adapter": adapter}} if adapter else {}
     try:
-        async with BleakClient(address, timeout=10.0, **adapter_kw) as client:
+        async with BleakClient(address, timeout=5.0, **adapter_kw) as client:
             if not client.is_connected:
                 return None
             for service in client.services:
@@ -157,9 +157,9 @@ async def probe_all_litime(scan_timeout: float = 10.0,
     adapter_kw = {"bluez": {"adapter": adapter}} if adapter else {}
     devices = await BleakScanner.discover(timeout=scan_timeout, **adapter_kw)
     log.info("Found %d BLE device(s), probing each...", len(devices))
-    # Probe up to 4 devices concurrently — sequential probing of 15+ devices
+    # Probe up to 8 devices concurrently — sequential probing of 15+ devices
     # can take 40s+ and blow past the scan timeout.
-    sem = asyncio.Semaphore(4)
+    sem = asyncio.Semaphore(8)
 
     async def _probe_with_sem(device):
         async with sem:
