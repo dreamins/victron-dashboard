@@ -188,10 +188,22 @@ class BridgeController:
 
         results = []
         try:
-            found = await asyncio.wait_for(
-                probe_all_litime(scan_timeout=15.0, probe_timeout=3.0, adapter=BLE_ADAPTER),
-                timeout=55.0,
-            )
+            # Retry once if BlueZ reports InProgress (BMS poller may have been mid-probe
+            # when its task was cancelled; BlueZ needs a moment to release the adapter).
+            found = []
+            for _attempt in range(2):
+                try:
+                    found = await asyncio.wait_for(
+                        probe_all_litime(scan_timeout=15.0, probe_timeout=3.0, adapter=BLE_ADAPTER),
+                        timeout=55.0,
+                    )
+                    break
+                except Exception as _exc:
+                    if "InProgress" in str(_exc) and _attempt == 0:
+                        log.warning("scan-bms: BLE adapter busy (InProgress), retrying in 10s")
+                        await asyncio.sleep(10.0)
+                    else:
+                        raise
             for address, write_uuid, notify_uuid in found:
                 frame: Dict = {}
                 try:
@@ -242,6 +254,27 @@ def _persist_mac(sites_file: str, site_id: str, device_id: str, mac: str):
         log.error("[%s/%s] failed to save discovered MAC: %s", site_id, device_id, e)
 
 
+def _persist_uuids(sites_file: str, site_id: str, device_id: str,
+                   write_uuid: str, notify_uuid: str) -> None:
+    """Write discovered BLE UUIDs back to sites.json so probe_all_litime is skipped on restart."""
+    path = pathlib.Path(sites_file)
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        for site in data.get("sites", []):
+            if site["id"] != site_id:
+                continue
+            for dev in site.get("devices", []):
+                if dev["id"] == device_id:
+                    dev["write_uuid"]  = write_uuid
+                    dev["notify_uuid"] = notify_uuid
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+        log.info("[%s/%s] UUIDs persisted to sites.json", site_id, device_id)
+    except Exception as e:
+        log.error("[%s/%s] failed to persist UUIDs: %s", site_id, device_id, e)
+
+
 def load_device_map(sites_file: str) -> Dict[str, Dict[str, Any]]:
     """Load sites.json and return {MAC_UPPER: {site_id, device_id, label, key, type, mac}}."""
     path = pathlib.Path(sites_file)
@@ -277,7 +310,9 @@ def load_device_map(sites_file: str) -> Dict[str, Dict[str, Any]]:
                 "type":           dev_type,
                 "mac":            mac,
                 "write_interval": int(dev.get("write_interval_s", _DEFAULT_WRITE_S)),
-                "capacity_ah":    dev.get("capacity_ah"),  # optional, for remaining_wh
+                "capacity_ah":    dev.get("capacity_ah"),
+                "write_uuid":     dev.get("write_uuid"),   # skips probe_all_litime on restart
+                "notify_uuid":    dev.get("notify_uuid"),
             }
     log.info("Loaded %d devices from %s", len(result), sites_file)
     return result
@@ -485,6 +520,10 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
     label       = info["label"]
     capacity_ah = info.get("capacity_ah")
     bms         = LiTimeBMS(mac, adapter=BLE_ADAPTER)
+    # Pre-load known UUIDs so probe_all_litime is skipped on connect
+    if info.get("write_uuid"):
+        bms._write_uuid  = info["write_uuid"]
+        bms._notify_uuid = info.get("notify_uuid")
     backoff_idx = 0
 
     def _on_data(fields: Dict[str, float]):
@@ -538,6 +577,12 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
             if not mac and bms.address:
                 mac = bms.address
                 _persist_mac(SITES_FILE, site_id, dev_id, mac)
+
+            # Persist newly discovered UUIDs so probe_all_litime is skipped on next restart.
+            if not info.get("write_uuid") and getattr(bms, "_write_uuid", None):
+                _persist_uuids(SITES_FILE, site_id, dev_id, bms._write_uuid, bms._notify_uuid or "")
+                info["write_uuid"]  = bms._write_uuid
+                info["notify_uuid"] = bms._notify_uuid
 
             # Scanner can run concurrently once the BMS connection is established.
             await _scanner_start()
