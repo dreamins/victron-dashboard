@@ -33,6 +33,7 @@ services:
       - INFLUX_BUCKET_MEDIUM=victron_test
       - INFLUX_BUCKET_HOURLY=victron_test
       - SITES_FILE=/app/sites_fixture.json
+      - BLE_BRIDGE_URL=
     volumes:
       - ./api/tests/sites_fixture.json:/app/sites_fixture.json:ro
     restart: "no"

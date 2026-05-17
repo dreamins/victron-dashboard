@@ -69,8 +69,9 @@ services:
       - INFLUX_BUCKET=victron
       - TZ_OFFSET_HOURS=${TZ_OFFSET_HOURS:-0}
       - SITES_FILE=/app/sites.json
+      - BLE_BRIDGE_URL=http://ble-bridge:8088
     volumes:
-      - ./config/sites.json:/app/sites.json:ro
+      - ./config/sites.json:/app/sites.json
     restart: unless-stopped
 
   ble-bridge:
@@ -78,9 +79,11 @@ services:
     privileged: true
     depends_on:
       - influxdb
+    expose:
+      - "8088"
     volumes:
       - /var/run/dbus:/var/run/dbus
-      - ./config/sites.json:/app/sites.json:ro
+      - ./config/sites.json:/app/sites.json
     environment:
       - INFLUX_URL=http://influxdb:8086
       - INFLUX_TOKEN=${INFLUXDB_TOKEN}

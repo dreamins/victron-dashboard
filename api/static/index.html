@@ -242,6 +242,137 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 .chart-title { font-size:11px; font-weight:800; color:var(--sub); text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; }
 .chart-container { height:210px; position:relative; }
 
+/* ── Settings panel ──────────────────────────────────────────────────── */
+#settings-overlay {
+  position:fixed; inset:0; z-index:400;
+  background:rgba(0,0,0,0.45); backdrop-filter:blur(4px);
+  display:flex; align-items:stretch; justify-content:flex-end;
+}
+#settings-overlay.hidden { display:none; }
+#settings-panel {
+  width:min(460px,100vw); height:100%;
+  background:var(--bg); border-left:1px solid var(--border);
+  display:flex; flex-direction:column; overflow:hidden;
+  animation:spanel-in 0.22s cubic-bezier(.4,0,.2,1);
+}
+@keyframes spanel-in { from{transform:translateX(100%)} to{transform:translateX(0)} }
+.sp-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:18px 20px; border-bottom:1px solid var(--border); flex-shrink:0;
+}
+.sp-title { font-size:16px; font-weight:800; }
+.sp-close {
+  background:var(--surf-2); border:1px solid var(--border); color:var(--text);
+  width:32px; height:32px; border-radius:8px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; font-size:18px; line-height:1;
+  transition:background 0.15s;
+}
+.sp-close:hover { background:var(--surf-1); }
+.sp-scroll { flex:1; overflow-y:auto; padding:16px 20px; }
+.sp-section { margin-bottom:20px; }
+.sp-section-title {
+  font-size:11px; font-weight:800; color:var(--sub);
+  text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;
+}
+.sp-device-row {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 12px; background:var(--surf-1);
+  border:1px solid var(--border); border-radius:12px; margin-bottom:8px;
+}
+.sp-device-info { flex:1; min-width:0; }
+.sp-device-name { font-size:13px; font-weight:700; }
+.sp-device-sub  { font-size:11px; color:var(--sub); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sp-remove-btn {
+  background:transparent; border:1px solid rgba(239,68,68,0.4); color:#ef4444;
+  padding:5px 10px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:600;
+  font-family:inherit; transition:all 0.15s; flex-shrink:0; white-space:nowrap;
+}
+.sp-remove-btn:hover { background:rgba(239,68,68,0.12); }
+.sp-add-btn {
+  display:flex; align-items:center; gap:8px; width:100%;
+  padding:10px 14px; background:var(--surf-2); border:1px solid var(--border);
+  border-radius:12px; color:var(--text); font-family:inherit; font-size:13px;
+  font-weight:600; cursor:pointer; transition:all 0.15s; margin-bottom:8px;
+}
+.sp-add-btn:hover { background:var(--surf-1); border-color:rgba(255,255,255,0.15); }
+.sp-add-icon {
+  width:26px; height:26px; border-radius:7px;
+  background:rgba(16,185,129,0.15); display:flex; align-items:center; justify-content:center;
+  font-size:16px; line-height:1; color:var(--charge); flex-shrink:0;
+}
+.sp-scan-area { margin-top:12px; }
+.sp-scan-loading {
+  display:flex; align-items:center; gap:10px; padding:14px 12px;
+  background:var(--surf-1); border:1px solid var(--border); border-radius:12px;
+  color:var(--sub); font-size:13px;
+}
+.sp-spinner {
+  width:18px; height:18px; border:2px solid var(--border);
+  border-top-color:var(--charge); border-radius:50%;
+  animation:spin 0.8s linear infinite; flex-shrink:0;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+.sp-scan-result {
+  padding:12px; background:var(--surf-1); border:1.5px solid var(--border);
+  border-radius:12px; margin-bottom:8px;
+}
+.sp-scan-result:hover { border-color:rgba(16,185,129,0.4); }
+.sp-scan-mac  { font-size:10px; color:var(--sub); margin-bottom:4px; letter-spacing:0.5px; }
+.sp-scan-vals { display:flex; gap:14px; margin-bottom:10px; }
+.sp-scan-val  { text-align:center; }
+.sp-scan-num  { font-size:18px; font-weight:800; }
+.sp-scan-lbl  { font-size:10px; color:var(--sub); font-weight:600; text-transform:uppercase; }
+.sp-scan-add  {
+  width:100%; padding:7px; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3);
+  color:var(--charge); border-radius:8px; cursor:pointer; font-family:inherit; font-size:13px;
+  font-weight:700; transition:all 0.15s;
+}
+.sp-scan-add:hover { background:rgba(16,185,129,0.25); }
+.sp-form { margin-top:10px; }
+.sp-field { margin-bottom:10px; }
+.sp-field label { display:block; font-size:11px; font-weight:700; color:var(--sub); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
+.sp-field input {
+  width:100%; padding:8px 10px; background:var(--surf-2); border:1px solid var(--border);
+  border-radius:8px; color:var(--text); font-family:inherit; font-size:13px;
+  outline:none; transition:border-color 0.15s;
+}
+.sp-field input:focus { border-color:rgba(0,242,255,0.4); }
+.sp-submit {
+  width:100%; padding:9px; background:var(--batt); border:none; border-radius:8px;
+  color:#000; font-family:inherit; font-size:13px; font-weight:800; cursor:pointer;
+  transition:opacity 0.15s; margin-top:4px;
+}
+.sp-submit:hover { opacity:0.85; }
+.sp-submit:disabled { opacity:0.4; cursor:not-allowed; }
+.sp-confirm-overlay {
+  position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.6);
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.sp-confirm-overlay.hidden { display:none; }
+.sp-confirm-box {
+  background:var(--bg); border:1px solid var(--border); border-radius:16px;
+  padding:24px; max-width:340px; width:100%;
+}
+.sp-confirm-title { font-size:16px; font-weight:800; margin-bottom:8px; }
+.sp-confirm-msg   { font-size:13px; color:var(--sub); margin-bottom:20px; line-height:1.5; }
+.sp-confirm-btns  { display:flex; gap:8px; }
+.sp-confirm-cancel {
+  flex:1; padding:9px; background:var(--surf-2); border:1px solid var(--border);
+  border-radius:8px; color:var(--text); font-family:inherit; font-size:13px;
+  font-weight:700; cursor:pointer;
+}
+.sp-confirm-ok {
+  flex:1; padding:9px; background:#ef4444; border:none;
+  border-radius:8px; color:white; font-family:inherit; font-size:13px;
+  font-weight:800; cursor:pointer;
+}
+#settings-gear {
+  background:var(--surf-2); border:1px solid var(--border); color:var(--text);
+  width:36px; height:36px; border-radius:10px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition:all 0.2s;
+}
+#settings-gear:hover { background:var(--surf-1); }
+
 /* ── Back button ─────────────────────────────────────────────────────── */
 #back-btn {
   display:none; align-items:center; gap:10px; width:100%;
@@ -300,8 +431,34 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
     <button id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="overflow:visible"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
     </button>
+    <button id="settings-gear" onclick="openSettings()" title="Site settings" style="display:none">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
   </div>
 </header>
+
+<!-- Settings panel overlay -->
+<div id="settings-overlay" class="hidden" onclick="if(event.target===this)closeSettings()">
+  <div id="settings-panel">
+    <div class="sp-header">
+      <span class="sp-title">Site Settings</span>
+      <button class="sp-close" onclick="closeSettings()">&#215;</button>
+    </div>
+    <div class="sp-scroll" id="sp-scroll"></div>
+  </div>
+</div>
+
+<!-- Confirm dialog (remove device) -->
+<div id="sp-confirm-overlay" class="sp-confirm-overlay hidden">
+  <div class="sp-confirm-box">
+    <div class="sp-confirm-title" id="sp-confirm-title">Remove device?</div>
+    <div class="sp-confirm-msg"   id="sp-confirm-msg"></div>
+    <div class="sp-confirm-btns">
+      <button class="sp-confirm-cancel" onclick="closeConfirm()">Cancel</button>
+      <button class="sp-confirm-ok"     id="sp-confirm-ok">Remove</button>
+    </div>
+  </div>
+</div>
 
 <div id="bridge-banner" class="hidden">Bridge Offline - check ESP32 connection</div>
 
@@ -654,6 +811,10 @@ function selectSite(id){
     document.getElementById('site-btn-label').textContent=site.label;
     buildSiteMenu();
   }
+
+  // Show gear icon for all sites with a configurable bridge
+  const isBleSite=site.bridge==='ble'||site.bridge==='linux_ble';
+  document.getElementById('settings-gear').style.display=isBleSite?'':'none';
 
   S.tab=3;
   document.getElementById('tab-bar').innerHTML='';
@@ -1299,6 +1460,214 @@ async function drawDailyBar(cid){
       }
     }
   });
+}
+
+// ── Settings panel ─────────────────────────────────────────────────────
+var _spScanState = null;  // null | 'scanning' | 'done' | 'error'
+var _spScanResults = [];
+var _spShowMpptForm = false;
+var _spBleOnly = false;
+
+function openSettings(){
+  if(!S.activeSite) return;
+  const site=S.sites.find(s=>s.id===S.activeSite)||{};
+  _spBleOnly = site.bridge==='ble' || site.bridge==='linux_ble';
+  _spScanState=null; _spScanResults=[]; _spShowMpptForm=false;
+  document.getElementById('settings-overlay').classList.remove('hidden');
+  renderSettingsPanel();
+}
+
+function closeSettings(){
+  document.getElementById('settings-overlay').classList.add('hidden');
+}
+
+function renderSettingsPanel(){
+  const site=S.sites.find(s=>s.id===S.activeSite)||{id:S.activeSite,label:S.activeSite};
+  const scroll=document.getElementById('sp-scroll');
+  const devices=S.devices||[];
+
+  let html=`<div class="sp-section">
+    <div class="sp-section-title">Devices — ${site.label||site.id}</div>`;
+
+  if(devices.length===0){
+    html+=`<div style="color:var(--sub);font-size:13px;padding:8px 0">No devices online yet.</div>`;
+  } else {
+    devices.forEach(d=>{
+      const f=S.current[d.id]?.fields||{};
+      const isBms='soc' in f && !('charge_state' in f);
+      const sub=isBms
+        ?`BMS · SOC ${f.soc!=null?f.soc.toFixed(0):'-'}%`
+        :`MPPT · ${f.pv_power!=null?fmtW(f.pv_power):'-'}`;
+      html+=`<div class="sp-device-row">
+        <div class="sp-device-info">
+          <div class="sp-device-name">${d.label||d.id}</div>
+          <div class="sp-device-sub">${sub} &nbsp;·&nbsp; id: ${d.id}</div>
+        </div>
+        <button class="sp-remove-btn" onclick="confirmRemoveDevice('${d.id}','${(d.label||d.id).replace(/'/g,"\\'")}')">Remove</button>
+      </div>`;
+    });
+  }
+  html+=`</div>`;
+
+  // Add BMS (BLE only)
+  if(_spBleOnly){
+    html+=`<div class="sp-section">
+      <div class="sp-section-title">Add Battery (BMS)</div>`;
+    if(_spScanState===null){
+      html+=`<button class="sp-add-btn" onclick="startBmsScan()">
+        <div class="sp-add-icon">&#9889;</div> Scan for BMS devices (~30 s)
+      </button>`;
+    } else if(_spScanState==='scanning'){
+      html+=`<div class="sp-scan-loading">
+        <div class="sp-spinner"></div> Scanning for BMS devices…
+      </div>`;
+    } else if(_spScanState==='error'){
+      html+=`<div style="color:var(--red);font-size:13px;padding:8px 0">Scan failed. Check that the BMS is powered on and not already connected.</div>
+      <button class="sp-add-btn" onclick="startBmsScan()">
+        <div class="sp-add-icon">&#9889;</div> Retry scan
+      </button>`;
+    } else if(_spScanResults.length===0){
+      html+=`<div style="color:var(--sub);font-size:13px;padding:8px 0">No BMS found. Make sure it is powered on and not connected to another device.</div>
+      <button class="sp-add-btn" onclick="startBmsScan()">
+        <div class="sp-add-icon">&#9889;</div> Scan again
+      </button>`;
+    } else {
+      html+=`<div class="sp-scan-area">`;
+      _spScanResults.forEach((r,i)=>{
+        const alreadyAdded=S.devices.some(d=>{
+          const f=S.current[d.id]?.fields||{};
+          return 'soc' in f && !('charge_state' in f);
+        });
+        html+=`<div class="sp-scan-result">
+          <div class="sp-scan-mac">${r.mac}</div>
+          <div class="sp-scan-vals">
+            <div class="sp-scan-val"><div class="sp-scan-num" style="color:var(--charge)">${r.soc!=null?r.soc.toFixed(0):'-'}%</div><div class="sp-scan-lbl">SOC</div></div>
+            <div class="sp-scan-val"><div class="sp-scan-num" style="color:var(--batt)">${r.voltage!=null?r.voltage.toFixed(2):'-'} V</div><div class="sp-scan-lbl">Voltage</div></div>
+            <div class="sp-scan-val"><div class="sp-scan-num">${r.temp!=null?r.temp.toFixed(0):'-'} °C</div><div class="sp-scan-lbl">Temp</div></div>
+          </div>
+          <button class="sp-scan-add" onclick="addBmsFromScan(${i})">Add this battery</button>
+        </div>`;
+      });
+      html+=`</div>
+      <button class="sp-add-btn" onclick="startBmsScan()" style="margin-top:4px">
+        <div class="sp-add-icon">&#9889;</div> Scan again
+      </button>`;
+    }
+    html+=`</div>`;
+  }
+
+  // Add MPPT form
+  html+=`<div class="sp-section">
+    <div class="sp-section-title">Add MPPT / Victron Device</div>`;
+  if(!_spShowMpptForm){
+    html+=`<button class="sp-add-btn" onclick="_spShowMpptForm=true;renderSettingsPanel()">
+      <div class="sp-add-icon" style="color:var(--solar);background:rgba(255,204,51,0.15)">&#9711;</div> Add MPPT / charge controller
+    </button>`;
+  } else {
+    html+=`<div class="sp-form">
+      <div class="sp-field"><label>Device ID</label><input id="sp-mppt-id" placeholder="e.g. mppt3" /></div>
+      <div class="sp-field"><label>Label</label><input id="sp-mppt-label" placeholder="e.g. MPPT 3" /></div>
+      <div class="sp-field"><label>MAC address</label><input id="sp-mppt-mac" placeholder="AA:BB:CC:DD:EE:FF" /></div>
+      <div class="sp-field"><label>BLE encryption key (32 hex chars)</label><input id="sp-mppt-key" placeholder="From VictronConnect → Product Info" /></div>
+      <button class="sp-submit" onclick="submitAddMppt()">Save device</button>
+    </div>`;
+  }
+  html+=`</div>`;
+
+  scroll.innerHTML=html;
+}
+
+async function startBmsScan(){
+  _spScanState='scanning'; _spScanResults=[];
+  renderSettingsPanel();
+  try{
+    const sq=`?site=${encodeURIComponent(S.activeSite)}`;
+    const res=await fetch(`/api/v1/scan/bms${sq}`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    _spScanResults=await res.json();
+    _spScanState='done';
+  }catch(e){
+    console.error('BMS scan failed:',e);
+    _spScanState='error';
+  }
+  renderSettingsPanel();
+}
+
+async function addBmsFromScan(idx){
+  const r=_spScanResults[idx];
+  if(!r) return;
+  const id='bms_'+(r.mac||'').replace(/:/g,'').toLowerCase().slice(-6);
+  const label='Battery';
+  try{
+    const resp=await fetch(`/api/v1/sites/${encodeURIComponent(S.activeSite)}/devices`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id,label,type:'litime_bms',mac:r.mac,
+        write_uuid:r.write_uuid,notify_uuid:r.notify_uuid})
+    });
+    if(!resp.ok){
+      const err=await resp.json().catch(()=>({}));
+      alert('Error: '+(err.detail||resp.statusText));
+      return;
+    }
+    _spScanResults.splice(idx,1);
+    _spScanState=_spScanResults.length>0?'done':null;
+    renderSettingsPanel();
+    poll();  // refresh dashboard data
+  }catch(e){ alert('Network error: '+e); }
+}
+
+async function submitAddMppt(){
+  const id   =document.getElementById('sp-mppt-id')?.value.trim();
+  const label=document.getElementById('sp-mppt-label')?.value.trim();
+  const mac  =document.getElementById('sp-mppt-mac')?.value.trim().toUpperCase();
+  const key  =document.getElementById('sp-mppt-key')?.value.trim();
+  if(!id||!label||!mac||!key){ alert('All fields are required.'); return; }
+  if(!/^[A-F0-9:]{17}$/.test(mac)){ alert('MAC address must be in format AA:BB:CC:DD:EE:FF'); return; }
+  if(!/^[0-9a-fA-F]{32}$/.test(key)){ alert('BLE key must be 32 hex characters'); return; }
+  try{
+    const resp=await fetch(`/api/v1/sites/${encodeURIComponent(S.activeSite)}/devices`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id,label,type:'victron_smartsolar',mac,key})
+    });
+    if(!resp.ok){
+      const err=await resp.json().catch(()=>({}));
+      alert('Error: '+(err.detail||resp.statusText));
+      return;
+    }
+    _spShowMpptForm=false;
+    renderSettingsPanel();
+    poll();
+  }catch(e){ alert('Network error: '+e); }
+}
+
+function confirmRemoveDevice(id,label){
+  document.getElementById('sp-confirm-title').textContent='Remove '+label+'?';
+  document.getElementById('sp-confirm-msg').textContent=
+    'This will remove "'+label+'" from the site configuration and stop data collection for this device. This cannot be undone from the dashboard.';
+  const ok=document.getElementById('sp-confirm-ok');
+  ok.onclick=()=>doRemoveDevice(id);
+  document.getElementById('sp-confirm-overlay').classList.remove('hidden');
+}
+
+function closeConfirm(){
+  document.getElementById('sp-confirm-overlay').classList.add('hidden');
+}
+
+async function doRemoveDevice(id){
+  closeConfirm();
+  try{
+    const resp=await fetch(
+      `/api/v1/sites/${encodeURIComponent(S.activeSite)}/devices/${encodeURIComponent(id)}`,
+      {method:'DELETE'}
+    );
+    if(!resp.ok){
+      const err=await resp.json().catch(()=>({}));
+      alert('Error: '+(err.detail||resp.statusText));
+      return;
+    }
+    renderSettingsPanel();
+    poll();
+  }catch(e){ alert('Network error: '+e); }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────

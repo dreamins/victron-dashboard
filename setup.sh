@@ -594,6 +594,218 @@ _p6_certbot_manual() {
     ok "Certificate issued"
 }
 
+# ─── Step X: sites.json wizard (add-only) ────────────────────────────────────
+# Writes config/sites.json. If the file already exists this step only asks
+# whether the user wants to add another site — it never overwrites entries.
+
+_setup_sites() {
+    mkdir -p config
+
+    # Show existing config and offer to add more
+    if [[ -f config/sites.json ]]; then
+        local count
+        count=$(python3 -c \
+            "import json; print(len(json.load(open('config/sites.json')).get('sites',[])))" \
+            2>/dev/null || echo 0)
+        if [[ "$count" -gt 0 ]]; then
+            ok "${count} site(s) already configured:"
+            python3 -c "
+import json
+for s in json.load(open('config/sites.json')).get('sites',[]):
+    devs=len(s.get('devices',[]))
+    print(f'    - {s[\"label\"]} ({s[\"id\"]}, {s.get(\"bridge\",\"ble\")}, {devs} device(s))')
+" 2>/dev/null || true
+            echo ""
+            read -rp "  Add another site? [y/N] " ADD_MORE
+            [[ "${ADD_MORE,,}" == "y" ]] || return
+        fi
+    fi
+
+    hr
+    cat <<EOF
+
+${BOLD}Site configuration${NC}
+
+  A "site" is a physical installation — e.g. "Home Solar" or "Garage Solar".
+  Each site has a bridge type:
+    ${BOLD}ble${NC}    — Linux BLE adapter on this server (direct Bluetooth connection)
+    ${BOLD}esp32${NC}  — ESP32 WiFi bridge (for remote or indoor installations)
+
+EOF
+
+    # Load existing data or start fresh
+    if [[ -f config/sites.json ]]; then
+        SITES_JSON=$(cat config/sites.json)
+    else
+        SITES_JSON='{"sites":[]}'
+    fi
+
+    local CONTINUE=true
+    while $CONTINUE; do
+        echo ""
+        read -rp "  Site ID (short, no spaces, e.g. 'garage'): " SITE_ID
+        [[ -n "$SITE_ID" && "$SITE_ID" =~ ^[a-zA-Z0-9_-]+$ ]] \
+            || { warn "Site ID must be alphanumeric/underscore/dash."; continue; }
+
+        # Check for duplicate
+        if echo "$SITES_JSON" | python3 -c \
+            "import json,sys; d=json.load(sys.stdin); print('DUP' if any(s['id']=='${SITE_ID}' for s in d.get('sites',[])) else '')" \
+            2>/dev/null | grep -q DUP; then
+            warn "Site '${SITE_ID}' already exists."
+            continue
+        fi
+
+        read -rp "  Site label (human name, e.g. 'Garage Solar'): " SITE_LABEL
+        [[ -n "$SITE_LABEL" ]] || SITE_LABEL="$SITE_ID"
+
+        echo "  Bridge type: [1] ble (Linux BLE adapter)  [2] esp32 (ESP32 WiFi)"
+        read -rp "  Choice [1]: " BRIDGE_CHOICE
+        BRIDGE_TYPE=${BRIDGE_CHOICE:-1}
+        if [[ "$BRIDGE_TYPE" == "2" ]]; then
+            BRIDGE="esp32"
+        else
+            BRIDGE="ble"
+        fi
+
+        read -rp "  Timezone offset from UTC (hours, e.g. 4 or -5) [0]: " TZ_OFF
+        TZ_OFF=${TZ_OFF:-0}
+
+        echo ""
+        echo "  Now add devices for site '${SITE_LABEL}'."
+        echo "  For Victron MPPTs: you need the MAC and BLE encryption key"
+        echo "    (VictronConnect → device → ⋮ → Product Info → Encryption Key)."
+        echo "  For LiTime BMS: only a label is needed — MAC discovered automatically."
+        echo ""
+
+        DEVICES_JSON="[]"
+
+        local ADD_DEV=true
+        while $ADD_DEV; do
+            echo "  Device type: [1] Victron MPPT  [2] LiTime BMS  [3] Done"
+            read -rp "  Choice: " DEV_CHOICE
+
+            case "$DEV_CHOICE" in
+            1)  # Victron MPPT
+                read -rp "    Device ID (e.g. mppt1): " DEV_ID
+                read -rp "    Label (e.g. 'MPPT 1'): " DEV_LABEL
+                read -rp "    MAC address (AA:BB:CC:DD:EE:FF): " DEV_MAC
+                read -rp "    Encryption key (32 hex chars): " DEV_KEY
+                DEVICES_JSON=$(echo "$DEVICES_JSON" | python3 -c "
+import json, sys
+d=json.load(sys.stdin)
+d.append({'id':'${DEV_ID}','label':'${DEV_LABEL}','type':'victron_smartsolar',
+          'mac':'${DEV_MAC}'.upper(),'key':'${DEV_KEY}'})
+print(json.dumps(d))")
+                ok "MPPT '${DEV_LABEL}' added"
+                ;;
+            2)  # LiTime BMS
+                read -rp "    Device ID (e.g. bms_main): " DEV_ID
+                read -rp "    Label (e.g. 'Battery'): " DEV_LABEL
+                DEVICES_JSON=$(echo "$DEVICES_JSON" | python3 -c "
+import json, sys
+d=json.load(sys.stdin)
+d.append({'id':'${DEV_ID}','label':'${DEV_LABEL}','type':'litime_bms'})
+print(json.dumps(d))")
+                ok "BMS '${DEV_LABEL}' added (MAC will be auto-discovered)"
+                ;;
+            3|"")
+                ADD_DEV=false
+                ;;
+            *)  warn "Invalid choice." ;;
+            esac
+        done
+
+        # Determine UI config from devices
+        MPPT_COUNT=$(echo "$DEVICES_JSON" | python3 -c \
+            "import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d if 'mppt' in x.get('type','')))" 2>/dev/null || echo 2)
+        HAS_BMS=$(echo "$DEVICES_JSON" | python3 -c \
+            "import json,sys; d=json.load(sys.stdin); print('true' if any('bms' in x.get('type','') for x in d) else 'false')" 2>/dev/null || echo false)
+
+        # Append to existing sites
+        SITES_JSON=$(echo "$SITES_JSON" | python3 -c "
+import json, sys
+d=json.load(sys.stdin)
+site={
+  'id':'${SITE_ID}','label':'${SITE_LABEL}','bridge':'${BRIDGE}',
+  'tz_offset_hours':${TZ_OFF},
+  'ui':{'show_loads':${BRIDGE}!='ble','battery_display':'bms' if ${HAS_BMS} else 'sense','mppt_count':${MPPT_COUNT}},
+  'devices':${DEVICES_JSON}
+}
+d.setdefault('sites',[]).append(site)
+print(json.dumps(d, indent=2))")
+
+        echo ""
+        read -rp "  Add another site? [y/N] " MORE
+        [[ "${MORE,,}" == "y" ]] || CONTINUE=false
+    done
+
+    echo "$SITES_JSON" > config/sites.json
+    ok "config/sites.json written"
+
+    # Apply updated ui flags via Python (show_loads string → bool)
+    python3 -c "
+import json
+d=json.load(open('config/sites.json'))
+for s in d.get('sites',[]):
+    ui=s.setdefault('ui',{})
+    has_bms=any('bms' in x.get('type','') for x in s.get('devices',[]))
+    if 'battery_display' not in ui:
+        ui['battery_display']='bms' if has_bms else 'sense'
+    if 'mppt_count' not in ui:
+        ui['mppt_count']=sum(1 for x in s.get('devices',[]) if 'mppt' in x.get('type',''))
+    if 'show_loads' not in ui:
+        ui['show_loads']=s.get('bridge','ble')!='ble'
+json.dump(d, open('config/sites.json','w'), indent=2)
+" 2>/dev/null || true
+}
+
+# ─── Install pre-commit hook ──────────────────────────────────────────────────
+# Blocks commits that contain real MAC addresses. Test fixture MACs in known
+# paths are excluded. Run after every git clone / re-setup.
+
+_install_hooks() {
+    local hook_dir=".git/hooks"
+    if [[ ! -d "$hook_dir" ]]; then
+        warn "No .git/hooks directory found — skipping hook install"
+        return
+    fi
+
+    cat > "${hook_dir}/pre-commit" <<'HOOK'
+#!/bin/sh
+# Block commits containing real MAC addresses (xx:xx:xx:xx:xx:xx pattern).
+# Excludes known test/fixture paths where dummy MACs are expected.
+MAC_PATTERN='[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}'
+EXCLUDE_PREFIXES="ble-bridge/fixtures/ ble-bridge/tests/ api/tests/"
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null)
+[ -z "$staged" ] && exit 0
+
+filtered=""
+for f in $staged; do
+    skip=0
+    for excl in $EXCLUDE_PREFIXES; do
+        case "$f" in $excl*) skip=1; break ;; esac
+    done
+    [ "$skip" -eq 0 ] && filtered="$filtered$f
+"
+done
+[ -z "$filtered" ] && exit 0
+
+if echo "$filtered" | tr -d ' ' | grep -v '^$' | xargs -d '\n' grep -lE "$MAC_PATTERN" 2>/dev/null | head -1 | grep -q .; then
+    echo "" >&2
+    echo "  ERROR: Staged file(s) contain MAC addresses." >&2
+    echo "  Real device MACs must stay in config/sites.json (which is gitignored)." >&2
+    echo "  Use 'git commit --no-verify' only if you are sure this is a test fixture." >&2
+    echo "" >&2
+    exit 1
+fi
+exit 0
+HOOK
+
+    chmod +x "${hook_dir}/pre-commit"
+    ok "Pre-commit MAC-address hook installed"
+}
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 main() {
@@ -602,6 +814,8 @@ main() {
     echo -e "────────────────────"
 
     _setup_server
+    _install_hooks
+    _setup_sites
     _setup_flash
     _setup_devices
     _setup_dashboard

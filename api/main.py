@@ -2,13 +2,15 @@ import json
 import os
 import pathlib
 import re
+import tempfile
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Tuple
-from dataclasses import dataclass
 
+import httpx
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.staticfiles import StaticFiles
 from influxdb_client import InfluxDBClient
+from pydantic import BaseModel
 
 # --- Configuration ---
 INFLUX_URL            = os.environ["INFLUX_URL"]
@@ -19,6 +21,7 @@ INFLUX_BUCKET_MEDIUM  = os.environ.get("INFLUX_BUCKET_MEDIUM", f"{INFLUX_BUCKET}
 INFLUX_BUCKET_HOURLY  = os.environ.get("INFLUX_BUCKET_HOURLY", f"{INFLUX_BUCKET}_hourly")
 TZ_OFFSET_HOURS       = float(os.environ.get("TZ_OFFSET_HOURS", "0"))
 SITES_FILE            = os.environ.get("SITES_FILE", "")
+BLE_BRIDGE_URL        = os.environ.get("BLE_BRIDGE_URL", "")
 
 ONLINE_S      = 90   # covers 60s write_interval_s with 30s buffer
 BRIDGE_S      = 120
@@ -94,6 +97,49 @@ def _load_sites_config() -> List[Dict[str, Any]]:
             "device_types":    list({d.get("type", "unknown") for d in s.get("devices", [])}),
         })
     return sites
+
+
+def _load_sites_raw() -> dict:
+    """Read sites.json with secrets intact (mac, key). Returns full dict."""
+    if not SITES_FILE or not pathlib.Path(SITES_FILE).exists():
+        return {"sites": []}
+    with open(SITES_FILE) as f:
+        return json.load(f)
+
+
+def _write_sites_atomic(data: dict) -> None:
+    """Write sites.json atomically via a temp file + os.replace()."""
+    path = pathlib.Path(SITES_FILE)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+async def _bridge_reload() -> None:
+    """Signal ble-bridge to reload sites.json. No-op if BLE_BRIDGE_URL unset."""
+    if not BLE_BRIDGE_URL:
+        return
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(f"{BLE_BRIDGE_URL}/reload")
+        resp.raise_for_status()
+
+
+class DeviceCreate(BaseModel):
+    id:          str
+    label:       str
+    type:        str            # e.g. "litime_bms", "victron_smartsolar"
+    mac:         Optional[str] = None
+    write_uuid:  Optional[str] = None
+    notify_uuid: Optional[str] = None
+    key:         Optional[str] = None  # BLE encryption key (Victron devices)
 
 
 class InfluxRepository:
@@ -427,6 +473,89 @@ def daily(
 ):
     tz_off = tz_offset if tz_offset is not None else TZ_OFFSET_HOURS
     return {"days": repo.get_daily(days, timedelta(hours=tz_off), today_only=today_only, site=site)}
+
+
+@app.get("/api/v1/scan/bms")
+async def scan_bms(site: str = Query(...)):
+    """Proxy a BMS discovery scan to ble-bridge. Returns found devices with live SOC/V/temp.
+    Only valid for sites with bridge=ble. Takes up to ~55 s."""
+    all_sites = _load_sites_config()
+    s = next((x for x in all_sites if x["id"] == site), None)
+    if s is None:
+        raise HTTPException(404, "site not found")
+    if s.get("bridge") not in ("ble", "linux_ble"):
+        raise HTTPException(400, "site does not use a BLE bridge — scan not available")
+    if not BLE_BRIDGE_URL:
+        raise HTTPException(503, "BLE_BRIDGE_URL not configured")
+    async with httpx.AsyncClient(timeout=65.0) as client:
+        try:
+            resp = await client.post(f"{BLE_BRIDGE_URL}/scan-bms")
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.TimeoutException:
+            raise HTTPException(504, "BMS scan timed out")
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(502, f"Bridge error: {exc.response.text}")
+        except Exception as exc:
+            raise HTTPException(502, f"Bridge unreachable: {exc}")
+
+
+@app.post("/api/v1/sites/{site_id}/devices")
+async def add_device(site_id: str, device: DeviceCreate):
+    """Add a device to a site in sites.json and reload ble-bridge."""
+    if not _ID_RE.match(site_id):
+        raise HTTPException(400, "invalid site_id")
+    if not _ID_RE.match(device.id):
+        raise HTTPException(400, "invalid device id")
+    if not SITES_FILE:
+        raise HTTPException(503, "SITES_FILE not configured")
+    path = pathlib.Path(SITES_FILE)
+    if not path.exists():
+        raise HTTPException(404, "sites.json not found")
+
+    data = _load_sites_raw()
+    site = next((s for s in data.get("sites", []) if s["id"] == site_id), None)
+    if site is None:
+        raise HTTPException(404, "site not found")
+    if any(d["id"] == device.id for d in site.get("devices", [])):
+        raise HTTPException(409, f"device '{device.id}' already exists in site '{site_id}'")
+
+    entry: Dict[str, Any] = {"id": device.id, "label": device.label, "type": device.type}
+    if device.mac:         entry["mac"]         = device.mac
+    if device.write_uuid:  entry["write_uuid"]  = device.write_uuid
+    if device.notify_uuid: entry["notify_uuid"] = device.notify_uuid
+    if device.key:         entry["key"]         = device.key
+
+    site.setdefault("devices", []).append(entry)
+    _write_sites_atomic(data)
+    await _bridge_reload()
+    return {"ok": True, "device": device.id}
+
+
+@app.delete("/api/v1/sites/{site_id}/devices/{device_id}")
+async def remove_device(site_id: str, device_id: str):
+    """Remove a device from a site in sites.json and reload ble-bridge."""
+    if not _ID_RE.match(site_id) or not _ID_RE.match(device_id):
+        raise HTTPException(400, "invalid id")
+    if not SITES_FILE:
+        raise HTTPException(503, "SITES_FILE not configured")
+    path = pathlib.Path(SITES_FILE)
+    if not path.exists():
+        raise HTTPException(404, "sites.json not found")
+
+    data = _load_sites_raw()
+    site = next((s for s in data.get("sites", []) if s["id"] == site_id), None)
+    if site is None:
+        raise HTTPException(404, "site not found")
+
+    before = len(site.get("devices", []))
+    site["devices"] = [d for d in site.get("devices", []) if d["id"] != device_id]
+    if len(site["devices"]) == before:
+        raise HTTPException(404, f"device '{device_id}' not found in site '{site_id}'")
+
+    _write_sites_atomic(data)
+    await _bridge_reload()
+    return {"ok": True}
 
 
 _STATIC = pathlib.Path(__file__).parent / "static"

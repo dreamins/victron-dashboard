@@ -1,4 +1,6 @@
 bleak>=0.21
 victron-ble>=0.8.0
 influxdb-client>=1.39
+aiohttp>=3.9
 pytest>=7
+pytest-asyncio>=0.23

@@ -44,6 +44,162 @@ _BMS_BACKOFF      = [5, 10, 20, 40]   # seconds; capped at last entry
 _DEFAULT_WRITE_S  = 60                 # write each Victron device at most once per minute
 
 
+async def _read_one_bms_frame(address: str, write_uuid: str, notify_uuid: str) -> Dict:
+    """Connect to a BMS, collect one data frame, disconnect. Returns field dict."""
+    from drivers.litime import LiTimeBMS
+    result: Dict = {}
+    ev = asyncio.Event()
+
+    def _cb(fields: Dict):
+        result.update(fields)
+        ev.set()
+
+    bms = LiTimeBMS(address, adapter=BLE_ADAPTER)
+    bms._write_uuid   = write_uuid
+    bms._notify_uuid  = notify_uuid
+    bms.on_data_callback = _cb
+    try:
+        await bms.connect()
+        await bms.poll()
+        await asyncio.wait_for(ev.wait(), timeout=8.0)
+    finally:
+        await bms.disconnect()
+    return result
+
+
+class BridgeController:
+    """Manages scanner and BMS poller tasks; supports reload and BMS scan.
+
+    A single instance lives in run_production() and is shared with the
+    aiohttp API server so /reload and /scan-bms can reach it.
+    """
+
+    def __init__(self, device_map: Dict[str, Any], writer: "InfluxWriter"):
+        self.device_map: Dict[str, Any] = device_map
+        self.writer = writer
+        self._scanner_task: Optional[asyncio.Task] = None
+        self._bms_tasks:    Dict[str, asyncio.Task] = {}
+
+    # ── helpers ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _bms_key(info: Dict) -> str:
+        return info.get("mac") or f"_{info['site_id']}_{info['device_id']}"
+
+    @staticmethod
+    def _victron_subset(dm: Dict) -> Dict:
+        return {mac: info for mac, info in dm.items()
+                if info.get("type") not in _BMS_TYPES}
+
+    @staticmethod
+    def _bms_list(dm: Dict):
+        return [info for info in dm.values() if info.get("type") in _BMS_TYPES]
+
+    # ── lifecycle ──────────────────────────────────────────────────────────
+
+    def start(self):
+        """Spawn initial scanner + BMS poller tasks."""
+        victron  = self._victron_subset(self.device_map)
+        bms_devs = self._bms_list(self.device_map)
+
+        ready = [i for i in bms_devs if i.get("mac")]
+        uncfg = [i for i in bms_devs if not i.get("mac")]
+        if len(uncfg) > 1:
+            for info in uncfg:
+                log.error("[%s/%s] BMS has no MAC — cannot start poller; "
+                          "run scan-bms via dashboard to identify it",
+                          info["site_id"], info["device_id"])
+            bms_devs = ready
+        elif len(uncfg) == 1:
+            bms_devs = ready + uncfg
+
+        self._scanner_task = asyncio.create_task(run_ble_scanner(victron, self.writer))
+        for info in bms_devs:
+            key = self._bms_key(info)
+            self._bms_tasks[key] = asyncio.create_task(run_bms_poller(info, self.writer))
+
+        log.info("BridgeController started: %d Victron device(s), %d BMS poller(s)",
+                 len(victron), len(bms_devs))
+
+    async def reload(self):
+        """Re-read sites.json and diff-apply changes to running tasks."""
+        new_map = load_device_map(SITES_FILE)
+
+        old_bms_keys = {self._bms_key(v) for v in self.device_map.values()
+                        if v.get("type") in _BMS_TYPES}
+        new_bms_keys = {self._bms_key(v) for v in new_map.values()
+                        if v.get("type") in _BMS_TYPES}
+
+        # Cancel tasks for removed BMS devices
+        for key in old_bms_keys - new_bms_keys:
+            t = self._bms_tasks.pop(key, None)
+            if t and not t.done():
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        # Restart scanner with updated Victron device list
+        new_victron = self._victron_subset(new_map)
+        if self._scanner_task and not self._scanner_task.done():
+            self._scanner_task.cancel()
+            try:
+                await self._scanner_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        await asyncio.sleep(1.0)  # let BlueZ stop the old discovery session
+        self._scanner_task = asyncio.create_task(run_ble_scanner(new_victron, self.writer))
+
+        # Spawn tasks for newly added BMS devices
+        new_bms_by_key = {self._bms_key(v): v for v in new_map.values()
+                          if v.get("type") in _BMS_TYPES}
+        for key in new_bms_keys - old_bms_keys:
+            info = new_bms_by_key[key]
+            self._bms_tasks[key] = asyncio.create_task(run_bms_poller(info, self.writer))
+
+        self.device_map = new_map
+        log.info("Bridge reloaded: %d device(s) (%d Victron, %d BMS)",
+                 len(new_map), len(new_victron), len(new_bms_keys))
+
+    async def scan_bms(self) -> list:
+        """Stop scanner, probe all LiTime BMS devices, read one frame, restart scanner."""
+        from drivers.litime import probe_all_litime
+
+        was_running = await _scanner_stop()
+        if was_running:
+            await asyncio.sleep(0.5)
+
+        results = []
+        try:
+            found = await asyncio.wait_for(
+                probe_all_litime(scan_timeout=15.0, probe_timeout=3.0, adapter=BLE_ADAPTER),
+                timeout=55.0,
+            )
+            for address, write_uuid, notify_uuid in found:
+                frame: Dict = {}
+                try:
+                    frame = await asyncio.wait_for(
+                        _read_one_bms_frame(address, write_uuid, notify_uuid),
+                        timeout=20.0,
+                    )
+                except Exception as exc:
+                    log.warning("scan-bms: frame read failed for %s: %s", address, exc)
+                results.append({
+                    "mac":         address,
+                    "write_uuid":  write_uuid,
+                    "notify_uuid": notify_uuid,
+                    "soc":         frame.get("soc"),
+                    "voltage":     frame.get("battery_voltage"),
+                    "temp":        frame.get("temperature"),
+                })
+        finally:
+            if was_running:
+                await _scanner_start()
+
+        return results
+
+
 def _persist_mac(sites_file: str, site_id: str, device_id: str, mac: str):
     """Write a discovered BMS MAC back to sites.json so it survives restarts."""
     path = pathlib.Path(sites_file)
@@ -311,7 +467,7 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
     def _on_data(fields: Dict[str, float]):
         voltage = fields.get("battery_voltage", 0)
         if "remaining_charge_ah" in fields:
-            # Use BMS-reported remaining charge (bytes [62:64] of c_13 frame, 5 mAh/unit)
+            # Use BMS-reported remaining charge (bytes [62:64] of c_13 frame, 10 mAh/unit)
             fields["remaining_wh"] = round(fields["remaining_charge_ah"] * voltage, 0)
         elif capacity_ah is not None:
             soc = fields.get("soc", 0)
@@ -382,62 +538,50 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter):
             backoff_idx = min(backoff_idx + 1, len(_BMS_BACKOFF) - 1)
 
 
-async def run_production(device_map: Dict[str, Dict], writer: InfluxWriter):
-    """Run passive Victron scanner and active BMS pollers concurrently."""
-    victron_devices = {mac: info for mac, info in device_map.items()
-                       if info.get("type") not in _BMS_TYPES}
-    bms_devices     = [info for info in device_map.values()
-                       if info.get("type") in _BMS_TYPES]
+async def run_production(device_map: Dict[str, Any], writer: InfluxWriter):
+    """Run scanner, BMS pollers, and management API server concurrently."""
+    from api_server import run_api_server
 
-    # Separate BMS devices into those with a saved MAC (ready) and those without.
-    ready_bms       = [info for info in bms_devices if info.get("mac")]
-    unconfigured    = [info for info in bms_devices if not info.get("mac")]
-
-    if len(unconfigured) > 1:
-        # Multiple unconfigured BMSs — auto-probe would be ambiguous.
-        for info in unconfigured:
-            log.error(
-                "[%s/%s] BMS has no MAC address — cannot start poller. "
-                "Run 'bash identify_bms.sh' to identify and configure each BMS.",
-                info["site_id"], info["device_id"],
-            )
-        bms_devices = ready_bms
-    elif len(unconfigured) == 1:
-        # Single unconfigured BMS — safe to auto-probe (probe_for_litime finds exactly one).
-        bms_devices = ready_bms + unconfigured
-
-    tasks = []
-    # Always start the scanner — even with no Victron devices to record, the scan
-    # populates BlueZ's device cache so BMS pollers can call Device.Connect()
-    # without hanging. The scanner also fires _bms_seen_events for every MAC it
-    # spots, letting BMS pollers skip the blind-connect race condition.
-    tasks.append(asyncio.create_task(run_ble_scanner(victron_devices, writer)))
-    for info in bms_devices:
-        tasks.append(asyncio.create_task(run_bms_poller(info, writer)))
-
-    if len(tasks) == 1 and not victron_devices and not bms_devices:
+    if not device_map:
         log.warning("No devices configured — nothing to do")
         return
 
-    log.info("Production mode: %d Victron device(s) tracked, %d BMS poller(s)",
-             len(victron_devices), len(bms_devices))
+    controller = BridgeController(device_map, writer)
+    controller.start()
+    api_task   = asyncio.create_task(run_api_server(controller))
 
-    # Respond to SIGTERM (docker compose restart/stop) and SIGINT by cancelling
-    # tasks so BMS clients reach their finally blocks and call disconnect() before
-    # exit — prevents stale BlueZ connections that stop the BMS from advertising.
     loop = asyncio.get_running_loop()
 
     def _shutdown():
         log.info("Shutdown signal — cancelling tasks for clean BMS disconnect")
-        for t in tasks:
+        api_task.cancel()
+        for t in list(controller._bms_tasks.values()):
             t.cancel()
+        if controller._scanner_task and not controller._scanner_task.done():
+            controller._scanner_task.cancel()
 
     loop.add_signal_handler(signal.SIGTERM, _shutdown)
     loop.add_signal_handler(signal.SIGINT,  _shutdown)
 
+    log.info("Production mode: %d Victron device(s), %d BMS poller(s)",
+             sum(1 for v in device_map.values() if v.get("type") not in _BMS_TYPES),
+             sum(1 for v in device_map.values() if v.get("type") in _BMS_TYPES))
+
     try:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # api_task runs forever; BMS/scanner tasks are managed by the controller.
+        await api_task
+    except asyncio.CancelledError:
+        pass
     finally:
+        # Cancel all remaining tasks (including those spawned during reload).
+        remaining = list(controller._bms_tasks.values())
+        if controller._scanner_task:
+            remaining.append(controller._scanner_task)
+        for t in remaining:
+            if not t.done():
+                t.cancel()
+        if remaining:
+            await asyncio.gather(*remaining, return_exceptions=True)
         loop.remove_signal_handler(signal.SIGTERM)
         loop.remove_signal_handler(signal.SIGINT)
 
