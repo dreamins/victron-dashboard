@@ -173,15 +173,21 @@ class BridgeController:
 
         was_running = await _scanner_stop()
 
-        # Cancel active BMS pollers so connected batteries disconnect and advertise
-        paused_keys = list(self._bms_tasks.keys())
+        # Cancel active BMS pollers and wait for their finally-blocks to finish.
+        # Each poller's finally calls bms.disconnect() — we must wait for that to
+        # complete before probing, otherwise the BMS stays connected and stops advertising.
+        paused_tasks = []
+        paused_keys  = list(self._bms_tasks.keys())
         for key in paused_keys:
             t = self._bms_tasks.pop(key, None)
             if t and not t.done():
                 t.cancel()
-        if paused_keys:
-            log.info("scan-bms: paused %d BMS poller(s), waiting for BLE disconnect...", len(paused_keys))
-            await asyncio.sleep(4.0)  # allow BMS devices to disconnect + start advertising
+                paused_tasks.append(t)
+        if paused_tasks:
+            log.info("scan-bms: paused %d BMS poller(s), waiting for disconnect...", len(paused_tasks))
+            # gather with return_exceptions waits for finally blocks without re-raising CancelledError
+            await asyncio.gather(*paused_tasks, return_exceptions=True)
+            await asyncio.sleep(3.0)  # allow BMS to start advertising after disconnect
 
         if was_running:
             await asyncio.sleep(0.5)
