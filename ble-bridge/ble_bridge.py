@@ -187,32 +187,26 @@ class BridgeController:
             log.info("scan-bms: paused %d BMS poller(s), waiting for disconnect...", len(paused_tasks))
             # gather with return_exceptions waits for finally blocks without re-raising CancelledError
             await asyncio.gather(*paused_tasks, return_exceptions=True)
-            # LiTime BMS needs ~10s after a forced disconnect before it accepts new
-            # BLE connections — 3s is not enough, the probe would time out.
-            await asyncio.sleep(10.0)
+            # LiTime BMS needs ~20s after a forced disconnect before it reliably accepts
+            # new BLE connections and responds to GATT characteristic probes.
+            await asyncio.sleep(20.0)
 
         if was_running:
             await asyncio.sleep(0.5)
 
         results = []
         try:
-            # Retry once if BlueZ reports InProgress (BMS poller may have been mid-probe
-            # when its task was cancelled; BlueZ needs a moment to release the adapter).
             found = []
-            for _attempt in range(2):
-                try:
-                    found = await asyncio.wait_for(
-                        probe_all_litime(scan_timeout=15.0, probe_timeout=3.0, adapter=BLE_ADAPTER),
-                        timeout=70.0,
-                    )
-                    break
-                except Exception as _exc:
-                    log.warning("scan-bms: attempt %d raised %s: %s", _attempt, type(_exc).__name__, _exc)
-                    if "InProgress" in str(_exc) and _attempt == 0:
-                        log.warning("scan-bms: BLE adapter busy (InProgress), retrying in 10s")
-                        await asyncio.sleep(10.0)
-                    else:
-                        raise
+            try:
+                found = await asyncio.wait_for(
+                    probe_all_litime(scan_timeout=15.0, probe_timeout=5.0, adapter=BLE_ADAPTER),
+                    timeout=70.0,
+                )
+                log.info("scan-bms: probe complete, %d BMS device(s) found", len(found))
+            except Exception as _exc:
+                # BlueZ transient errors (InProgress, timeout) must not crash the scan
+                # endpoint — return empty so callers get a valid [] response, not HTTP 500.
+                log.warning("scan-bms: probe raised %s: %s — returning empty", type(_exc).__name__, _exc)
             for address, write_uuid, notify_uuid in found:
                 frame: Dict = {}
                 try:
