@@ -187,7 +187,9 @@ class BridgeController:
             log.info("scan-bms: paused %d BMS poller(s), waiting for disconnect...", len(paused_tasks))
             # gather with return_exceptions waits for finally blocks without re-raising CancelledError
             await asyncio.gather(*paused_tasks, return_exceptions=True)
-            await asyncio.sleep(3.0)  # allow BMS to start advertising after disconnect
+            # LiTime BMS needs ~10s after a forced disconnect before it accepts new
+            # BLE connections — 3s is not enough, the probe would time out.
+            await asyncio.sleep(10.0)
 
         if was_running:
             await asyncio.sleep(0.5)
@@ -205,6 +207,7 @@ class BridgeController:
                     )
                     break
                 except Exception as _exc:
+                    log.warning("scan-bms: attempt %d raised %s: %s", _attempt, type(_exc).__name__, _exc)
                     if "InProgress" in str(_exc) and _attempt == 0:
                         log.warning("scan-bms: BLE adapter busy (InProgress), retrying in 10s")
                         await asyncio.sleep(10.0)
