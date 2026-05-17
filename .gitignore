@@ -16,3 +16,5 @@ venv/
 *.egg-info/
 
 docs/take_screenshots.py
+.server
+backups/
