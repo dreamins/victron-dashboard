@@ -222,6 +222,10 @@ class BridgeController:
                     "temp":        frame.get("temperature"),
                 })
         finally:
+            # Brief pause so BlueZ finishes closing frame-read connections before
+            # the BMS pollers try to reconnect — avoids InProgress on their first connect.
+            if found:
+                await asyncio.sleep(2.0)
             # Restart BMS pollers for all configured BMS devices
             for info in self._bms_list(self.device_map):
                 key = self._bms_key(info)

@@ -113,7 +113,7 @@ MOCK_BATTERY_GARAGE = {
         "fields": {
             "soc": 82.0, "battery_voltage": 13.2, "battery_current": -0.5,
             "cycles": 45.0, "cell_min": 3.28, "cell_max": 3.31,
-            "cell_avg": 3.295, "soh": 97.0,
+            "cell_avg": 3.295, "soh": 97.0, "temperature": 22.0,
         },
     }
 }
@@ -679,3 +679,40 @@ class TestBmsCard:
         self._load_garage(page, static_server)
         soc_txt = page.locator("#flow-batt-soc").text_content() or ""
         assert "82" in soc_txt or "chg" in soc_txt
+
+    def test_bms_card_shows_temperature(self, page: Page, static_server: str):
+        """BMS card shows temperature reading."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        self._load_garage(page, static_server)
+        text = page.locator("#cards").inner_text()
+        assert "22" in text  # temperature = 22.0°C
+
+
+class TestBridgeBanner:
+    def test_esp32_banner_text(self, page: Page, static_server: str):
+        """Offline banner for ESP32 site says 'check ESP32 connection'."""
+        page.set_viewport_size({"width": 1280, "height": 720})
+        offline = dict(MOCK_DEVICES, bridge_online=False)
+        _setup_mocks(page, devices=offline)
+        page.add_init_script("localStorage.setItem('victron_selected_site', 'home')")
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+        banner_text = page.locator("#bridge-banner").text_content() or ""
+        assert "ESP32" in banner_text
+
+    def test_ble_banner_text(self, page: Page, static_server: str):
+        """Offline banner for BLE site says 'check ble-bridge container'."""
+        page.set_viewport_size({"width": 1280, "height": 720})
+        offline_garage = dict(MOCK_DEVICES_GARAGE, bridge_online=False)
+        _setup_mocks(
+            page,
+            sites=MOCK_SITES_MULTI,
+            devices=offline_garage,
+            current=MOCK_CURRENT_GARAGE,
+            battery=MOCK_BATTERY_GARAGE,
+        )
+        page.add_init_script("localStorage.setItem('victron_selected_site', 'garage')")
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+        banner_text = page.locator("#bridge-banner").text_content() or ""
+        assert "ble-bridge" in banner_text
