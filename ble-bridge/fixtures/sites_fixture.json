@@ -29,6 +29,7 @@
           "id": "litime_main",
           "label": "LiTime Battery",
           "type": "litime_bms",
+          "temperature_provider": true,
           "mac": "AA:BB:CC:DD:EE:33"
         }
       ]

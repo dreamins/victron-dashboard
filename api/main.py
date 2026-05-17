@@ -52,14 +52,24 @@ VALID_FIELDS = {
     "load_current", "load_power", "load_state", "charge_state",
     "yield_today", "yield_total", "error_code", "temperature",
     "battery_current", "charger_error",
+    # BMS fields (battery measurement)
+    "soc", "soh", "cycles", "cell_min", "cell_max", "cell_avg",
+    "temperature_mosfet",
 }
 FIELD_UNITS = {
     "pv_power": "W", "load_power": "W",
     "pv_voltage": "V", "battery_voltage": "V",
     "charge_current": "A", "load_current": "A", "battery_current": "A",
     "yield_today": "Wh", "yield_total": "kWh",
-    "temperature": "°C",
+    "temperature": "°C", "temperature_mosfet": "°C",
+    "soc": "%",
 }
+
+# Device types that write to the 'battery' InfluxDB measurement instead of 'solar'.
+_BMS_MEASUREMENT_TYPES = {"litime_bms"}
+
+# Device types that provide temperature (used to build temp_providers in sites response).
+_TEMP_PROVIDER_TYPES = {"victron_battery_sense", "litime_bms"}
 
 _DURATION_RE = re.compile(r"^(\d+)([smhdy])$")
 _UNITS_S     = {"s": 1, "m": 60, "h": 3600, "d": 86400, "y": 365 * 86400}
@@ -89,6 +99,13 @@ def _load_sites_config() -> List[Dict[str, Any]]:
     # Strip secrets (mac, key) before returning to callers
     sites = []
     for s in data.get("sites", []):
+        temp_providers = []
+        for d in s.get("devices", []):
+            # Explicit flag wins; fall back to type-based inference.
+            is_tp = d.get("temperature_provider",
+                           d.get("type") in _TEMP_PROVIDER_TYPES)
+            if is_tp:
+                temp_providers.append({"id": d["id"], "label": d.get("label", d["id"])})
         sites.append({
             "id":              s["id"],
             "label":           s.get("label", s["id"]),
@@ -96,8 +113,21 @@ def _load_sites_config() -> List[Dict[str, Any]]:
             "bridge":          s.get("bridge", "esp32"),
             "ui":              s.get("ui", {}),
             "device_types":    list({d.get("type", "unknown") for d in s.get("devices", [])}),
+            "temp_providers":  temp_providers,
         })
     return sites
+
+
+def _device_measurement(site_id: Optional[str], device_id: str) -> str:
+    """Return 'battery' for BMS devices, 'solar' for everything else."""
+    raw = _load_sites_raw()
+    for s in raw.get("sites", []):
+        if site_id and s["id"] != site_id:
+            continue
+        for dev in s.get("devices", []):
+            if dev["id"] == device_id:
+                return "battery" if dev.get("type") in _BMS_MEASUREMENT_TYPES else "solar"
+    return "solar"
 
 
 def _load_sites_raw() -> dict:
@@ -270,7 +300,8 @@ from(bucket: "{INFLUX_BUCKET}")
         return result
 
     def _actual_span_s(self, device: str, field: str, start_s: int,
-                       site: Optional[str]) -> Optional[int]:
+                       site: Optional[str],
+                       measurement: str = "solar") -> Optional[int]:
         """Return seconds from earliest data point to now, or None if no data.
         Uses first() which hits the TSM index — cheap even on large buckets."""
         segs = self._stitch(start_s)
@@ -278,7 +309,7 @@ from(bucket: "{INFLUX_BUCKET}")
         q = f"""
 from(bucket: "{bucket}")
   |> range(start: {t_start})
-  |> filter(fn: (r) => r._measurement == "solar" and r.device == "{device}" and r._field == "{field}")
+  |> filter(fn: (r) => r._measurement == "{measurement}" and r.device == "{device}" and r._field == "{field}")
   {_site_filter(site)}
   |> first()
   |> keep(columns: ["_time"])
@@ -294,7 +325,8 @@ from(bucket: "{bucket}")
         return None
 
     def get_history(self, device: str, field: str, start_s: int, interval: str,
-                    site: Optional[str] = None, max_points: int = 500) -> Dict[str, Any]:
+                    site: Optional[str] = None, max_points: int = 500,
+                    measurement: str = "solar") -> Dict[str, Any]:
         fn   = "max" if field in YIELD_FIELDS else "mean"
         segs = self._stitch(start_s)
         bucket_names = [s[0] for s in segs]
@@ -304,7 +336,7 @@ from(bucket: "{bucket}")
             q = f"""
 from(bucket: "{bucket}")
   |> range(start: {t_start}, stop: {t_stop})
-  |> filter(fn: (r) => r._measurement == "solar" and r.device == "{device}" and r._field == "{field}")
+  |> filter(fn: (r) => r._measurement == "{measurement}" and r.device == "{device}" and r._field == "{field}")
   {_site_filter(site)}
   |> aggregateWindow(every: {interval}, fn: {fn}, createEmpty: false)
   |> keep(columns: ["_time", "_value"])
@@ -316,7 +348,7 @@ from(bucket: "{bucket}")
                 parts.append(f"""t{i} = (
   from(bucket: "{bucket}")
     |> range(start: {t_start}, stop: {t_stop})
-    |> filter(fn: (r) => r._measurement == "solar" and r.device == "{device}" and r._field == "{field}")
+    |> filter(fn: (r) => r._measurement == "{measurement}" and r.device == "{device}" and r._field == "{field}")
     {_site_filter(site)}
     |> aggregateWindow(every: {interval}, fn: {fn}, createEmpty: false)
     |> keep(columns: ["_time", "_value"])
@@ -462,9 +494,12 @@ def history(
         # Use actual data span so short datasets get fine resolution even on
         # long-range queries (e.g. "All" with only a week of data uses ~30s
         # intervals instead of 12h).
-        span = repo._actual_span_s(device, field, range_s, site)
+        meas = _device_measurement(site, device)
+        span = repo._actual_span_s(device, field, range_s, site, measurement=meas)
         iv = _auto_interval(span if span else range_s, max_points)
-    return repo.get_history(device, field, range_s, iv, site=site)
+    else:
+        meas = _device_measurement(site, device)
+    return repo.get_history(device, field, range_s, iv, site=site, measurement=meas)
 
 
 @app.get("/api/v1/battery")

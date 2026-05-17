@@ -614,6 +614,7 @@ var S={
   bvolt:null, bsoc:null,
   tab:3, range:'24h', last:null, chartsLoaded:false, tabDefs:[],
   activeSite:null, sites:[], siteUi:{}, battData:{}, bmsDevice:null,
+  tempProviders:[],
 };
 var CH={};
 var _pollInterval=null;
@@ -800,6 +801,7 @@ function selectSite(id){
   S.current={}; S.devices=[]; S.mptts=[]; S.bsense=null;
   S.bvolt=null; S.bsoc=null; S.battData={}; S.bmsDevice=null;
   S.chartsLoaded=false; S.last=null; _cardsKey=''; _dailyCache={};
+  S.tempProviders=site.temp_providers||[];
   Object.values(CH).forEach(c=>c?.destroy()); CH={};
 
   document.getElementById('site-picker').style.display='none';
@@ -1305,7 +1307,9 @@ async function updateCharts(){
   } else if(def.kind==='battery'){
     const voltIds=[...(S.bsense?[S.bsense]:[]),...S.mptts];
     await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,' V');
-    if(S.bsense) await drawLine(`chart-${S.tab}-t`,S.bsense,'temperature',rng.st,'#f97316','°C');
+    // Temperature: use declared providers; fall back to bsense for old sites without temp_providers.
+    const tempIds=S.tempProviders.length>0?S.tempProviders.map(d=>d.id):(S.bsense?[S.bsense]:[]);
+    if(tempIds.length>0) await drawMulti(`chart-${S.tab}-t`,tempIds,'temperature',rng.st,'°C');
     await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,' A','Total Charging Current','#10b981');
     await drawBatteryPower(`chart-${S.tab}-p`,S.mptts,rng.st,wTick,'Total Charging Power','#f59e0b');
   } else {

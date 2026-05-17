@@ -29,6 +29,7 @@
           "id": "test_battery_sense",
           "label": "Test Battery Bank",
           "type": "victron_battery_sense",
+          "temperature_provider": true,
           "mac": "AA:BB:CC:DD:EE:03",
           "key": "ccddeeff00112233445566778899aabb"
         },
@@ -36,6 +37,7 @@
           "id": "test_bms",
           "label": "Test LiTime",
           "type": "litime_bms",
+          "temperature_provider": true,
           "mac": "AA:BB:CC:DD:EE:04"
         }
       ]
@@ -69,6 +71,7 @@
           "id": "test_garage_bms",
           "label": "Garage LiTime",
           "type": "litime_bms",
+          "temperature_provider": true,
           "mac": "AA:BB:CC:DD:EE:13"
         }
       ]

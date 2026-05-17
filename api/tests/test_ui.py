@@ -25,6 +25,7 @@ MOCK_SITES = {
             "bridge": "esp32",
             "ui": {"show_loads": True, "battery_display": "sense", "mppt_count": 2},
             "device_types": ["victron_mppt", "victron_battery_sense"],
+            "temp_providers": [{"id": "battery_sense", "label": "Battery Sense"}],
         }
     ]
 }
@@ -38,6 +39,7 @@ MOCK_SITES_MULTI = {
             "bridge": "esp32",
             "ui": {"show_loads": True, "battery_display": "sense", "mppt_count": 2},
             "device_types": ["victron_mppt", "victron_battery_sense"],
+            "temp_providers": [{"id": "battery_sense", "label": "Battery Sense"}],
         },
         {
             "id": "garage",
@@ -46,6 +48,7 @@ MOCK_SITES_MULTI = {
             "bridge": "ble",
             "ui": {"show_loads": False, "battery_display": "bms", "mppt_count": 2},
             "device_types": ["victron_mppt", "litime_bms"],
+            "temp_providers": [{"id": "garage_bms", "label": "Garage LiTime"}],
         },
     ]
 }
@@ -687,6 +690,86 @@ class TestBmsCard:
         text = page.locator("#cards").inner_text()
         assert "22" in text   # temperature = 22.0°C (cell)
         assert "27" in text   # temperature_mosfet = 27.0°C (MOSFET)
+
+
+class TestTemperatureChart:
+    def test_temp_providers_populated_for_home_site(self, page: Page, static_server: str):
+        """Home site: S.tempProviders contains the battery sense device from sites response."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        _setup_mocks(page, sites=MOCK_SITES_MULTI)
+        page.add_init_script("localStorage.setItem('victron_selected_site', 'home')")
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+        temp_providers = page.evaluate("() => S.tempProviders")
+        assert len(temp_providers) > 0
+        assert any(p["id"] == "battery_sense" for p in temp_providers)
+
+    def test_temp_providers_populated_for_garage_site(self, page: Page, static_server: str):
+        """Garage site: S.tempProviders contains the BMS device from sites response."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        _setup_mocks(
+            page,
+            sites=MOCK_SITES_MULTI,
+            devices=MOCK_DEVICES_GARAGE,
+            current=MOCK_CURRENT_GARAGE,
+            battery=MOCK_BATTERY_GARAGE,
+        )
+        page.add_init_script("localStorage.setItem('victron_selected_site', 'garage')")
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+        temp_providers = page.evaluate("() => S.tempProviders")
+        assert len(temp_providers) > 0
+        assert any(p["id"] == "garage_bms" for p in temp_providers)
+
+    def test_temp_chart_requests_bms_temperature_for_garage(self, page: Page, static_server: str):
+        """Garage battery tab requests temperature history from the BMS device (not Battery Sense)."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        captured_urls: list = []
+
+        def _intercept(route):
+            captured_urls.append(route.request.url)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(MOCK_HISTORY))
+
+        _setup_mocks(
+            page,
+            sites=MOCK_SITES_MULTI,
+            devices=MOCK_DEVICES_GARAGE,
+            current=MOCK_CURRENT_GARAGE,
+            battery=MOCK_BATTERY_GARAGE,
+        )
+        page.route("**/api/v1/history**", _intercept)
+        page.add_init_script("localStorage.setItem('victron_selected_site', 'garage')")
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+        page.locator("#cards .card").last.click()
+        page.wait_for_timeout(800)
+
+        temp_urls = [u for u in captured_urls if "temperature" in u and "/api/v1/history" in u]
+        assert any("garage_bms" in u for u in temp_urls), (
+            f"Expected history for garage_bms temperature, got: {temp_urls}"
+        )
+
+    def test_temp_chart_requests_bsense_temperature_for_home(self, page: Page, static_server: str):
+        """Home battery tab requests temperature history from the Battery Sense device."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        captured_urls: list = []
+
+        def _intercept(route):
+            captured_urls.append(route.request.url)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(MOCK_HISTORY))
+
+        _setup_mocks(page, sites=MOCK_SITES_MULTI)
+        page.route("**/api/v1/history**", _intercept)
+        page.add_init_script("localStorage.setItem('victron_selected_site', 'home')")
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+        page.locator("#cards .card").last.click()
+        page.wait_for_timeout(800)
+
+        temp_urls = [u for u in captured_urls if "temperature" in u and "/api/v1/history" in u]
+        assert any("battery_sense" in u for u in temp_urls), (
+            f"Expected history for battery_sense temperature, got: {temp_urls}"
+        )
 
 
 class TestBridgeBanner:
