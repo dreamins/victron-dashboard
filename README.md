@@ -1,73 +1,120 @@
-﻿# Victron Solar Monitor
+# Victron Solar Monitor
 
-A self-hosted solar energy dashboard for Victron BLE devices — no cloud, no subscriptions, no Victron servers. An ESP32 passively captures BLE advertisements from your Victron devices and feeds a web dashboard you can reach from anywhere over HTTPS.
+A self-hosted solar energy dashboard for Victron BLE devices — no cloud, no subscriptions, no Victron servers. Monitors multiple installations from a single dashboard with live energy flow, historical charts, and BMS battery tracking.
 
-> **Tested with:** 2× SmartSolar MPPT charge controllers + 1× Smart Battery Sense + ESP32-S3
+> **Tested with:** 2× SmartSolar MPPT + 1× Smart Battery Sense (ESP32 bridge) · 2× SmartSolar 150/75 MPPT + LiTime BMS (direct Linux BLE)
 
 ---
 
 ## Screenshots
 
-### Live Energy Flow (dark mode)
-![Dashboard dark mode — animated energy flow between solar panels, charge controllers, and battery](docs/screenshots/dashboard-dark.png)
+### Site Picker
+![Site picker landing page — choose between Home Solar and Garage Solar installations, with live PV wattage and BMS SOC shown per site](docs/screenshots/site-picker.png)
 
-### Live Energy Flow (light mode)
-![Dashboard light mode](docs/screenshots/dashboard-light.png)
+### Live Energy Flow (dark mode)
+![Dashboard dark mode — animated energy flow between solar panels, charge controllers, battery and loads](docs/screenshots/dashboard-dark.png)
+
+### Site Switcher
+![Header dropdown to switch between sites — checkmark on active site, All sites link to return to picker](docs/screenshots/site-switcher.png)
+
+### Garage Dashboard with BMS Card
+![Garage dashboard — two MPPTs feeding a LiTime BMS battery, 91% SOC with animated bar, cell delta, and remaining Wh](docs/screenshots/garage-dashboard.png)
 
 ### Historical Charts
-![Power and voltage charts with selectable time ranges](docs/screenshots/charts.png)
+![Charts tab — solar power, PV voltage, and charge current time series with 1h/6h/24h/7d/30d range selector](docs/screenshots/charts.png)
 
-### Battery
-![Battery voltage and temperature over time](docs/screenshots/battery.png)
+### Mobile
+![Mobile view of garage dashboard — full topology and BMS card on a 390px viewport](docs/screenshots/mobile.png)
 
 ---
 
 ## What you get
 
-- **Animated energy flow** — live arrows show power moving solar → charger → battery → load
-- **Per-device cards** — PV power, battery voltage, charge current, load, yield today/total, charge state
-- **Historical charts** — 1 h / 6 h / 24 h / 7 d / 30 d with automatic resolution (1-second live data always shown for the last hour)
+- **Multi-site** — monitor multiple physical installations from one dashboard; site picker on first load, instant switching via header dropdown
+- **Animated energy flow** — live arrows show power moving solar → charger → battery → load (load node hidden for sites without a load)
+- **BMS battery card** — for LiTime/EG4 batteries: SOC% hero number, animated charge bar, cell delta, cycles, remaining Wh
+- **Per-device cards** — PV power, battery voltage, charge current, yield today/total, charge state per MPPT
+- **Historical charts** — 1 h / 6 h / 24 h / 7 d / 30 d with automatic bucket resolution
 - **Daily yield bars** — timezone-aware so bars never split at UTC midnight
-- **Dark / light theme**
+- **Offline detection** — device and bridge status shown separately in the header
+- **Dark / light theme** — persisted across sessions
 - **Google OAuth gate** — only your email can reach the dashboard
 - **HTTPS** — Let's Encrypt certificate, accessible from anywhere
 
 ---
 
+## Architecture
+
+Two bridge paths write to the same InfluxDB instance, tagged by `site`:
+
+```
+── Home installation ──────────────────────────────────────────────
+ Victron MPPT × 2 + Battery Sense (BLE)
+   → ESP32 (ESPHome passive scanner, WiFi)
+   → MQTT: victron/home/raw → ble-decoder → InfluxDB  site=home
+
+── Garage installation ────────────────────────────────────────────
+ Victron 150/75 MPPT × 2 (BLE passive)
+   → ble-bridge (bleak, Linux hci adapter) → InfluxDB  site=garage
+ LiTime BMS (BLE active poll every 5 s)
+   → ble-bridge → InfluxDB  battery measurement
+
+Both sites ──────────────────────────────────────────────────────
+   InfluxDB → solar-api (FastAPI) → nginx + OAuth2 → Dashboard
+```
+
+**Home path** uses an ESP32 as a BLE-to-WiFi bridge (no Linux BLE adapter needed near the panels). **Garage path** runs ble-bridge directly on the Linux server, which is physically colocated with the panels and battery — no ESP32 needed.
+
+---
+
 ## What you need
 
-| | |
+| Component | Notes |
 |---|---|
-| **ESP32-S3** dev board | Placed near your Victron devices (BLE range, ~10 m). Flashed once via USB, then updates OTA. |
-| **Linux server** | Raspberry Pi, mini PC, or any always-on machine with Docker installed. |
-| **VictronConnect app** | To copy the encryption key from each device (one-time, ~30 seconds per device). |
-| **Domain name** | For HTTPS remote access. A free subdomain works. |
+| **Linux server** | Raspberry Pi, mini PC, or any always-on machine with Docker. Needs a Bluetooth adapter if bridging a garage/local installation directly. |
+| **ESP32-S3** (optional) | Required only for the home/remote path. Placed near Victron devices (BLE range ~10 m), flashed once via USB then updates OTA. |
+| **VictronConnect app** | To copy the 32-character encryption key from each device. One-time, ~30 seconds per device. |
+| **Domain name** | For HTTPS remote access. A free subdomain works fine. |
+
+**Tested Bluetooth hardware:**
+- ESP32-S3 dev board (home path, BT 4.x passive scan)
+- TP-Link UB500 (USB dongle, BT 5.1, `hci1`) — needed for BLE 5.0 extended advertising used by some devices
+- Built-in server adapter (`hci0`, BT 4.1) — adequate for Victron MPPTs but not BLE 5.0 BMS devices
 
 ---
 
 ## Installation
 
-Install ESPHome on the machine you'll use to flash the ESP32:
-
-```bash
-pip install esphome
-```
-
-Then on your Linux server:
+On your Linux server:
 
 ```bash
 git clone https://github.com/dreamins/victron-dashboard ~/victron-dashboard
 cd ~/victron-dashboard && ./setup.sh
 ```
 
-The wizard handles everything from there — it configures services, obtains a TLS certificate, sets up Google OAuth, and at the right moment prints the exact command to flash the ESP32 from your laptop. Follow the prompts; re-running is safe if you need to resume.
+The setup wizard handles everything — Docker stack, InfluxDB, MQTT broker, OAuth2 proxy, TLS certificate. It prompts you for:
 
-**During the wizard you will be asked to:**
-- Open VictronConnect on your phone, tap each device → ⋮ → Product Info, and copy the Encryption Key
-- Create a Google OAuth app and paste the Client ID and Secret ([console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials))
-- Enter your domain name, DNS provider API key (for the TLS certificate), and the email address that gets access
+- Each device's encryption key (from VictronConnect → device → Product Info)
+- Bridge type per installation: `esp32` (MQTT) or `ble` (direct Linux BLE)
+- Google OAuth Client ID and Secret ([console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials))
+- Your domain name, DNS provider API key, and the email address that gets access
 
-When it finishes, forward port **8443 TCP** on your router to the server's LAN IP and open `https://your.domain.com:8443/`.
+If flashing an ESP32 for the home path, the wizard prints the exact command to run from your laptop at the right moment.
+
+When finished, forward **port 8443 TCP** on your router to the server's LAN IP and open `https://your.domain.com:8443/`.
+
+---
+
+## Data model
+
+All measurements are tagged `site` + `device` + `label`.
+
+| Measurement | Fields |
+|---|---|
+| `solar` | `pv_power`, `pv_voltage`, `battery_voltage`, `charge_current`, `yield_today`, `yield_total`, `charge_state`, `load_current`, `temperature` |
+| `battery` | `soc`, `soh`, `cycles`, `temperature`, `battery_voltage`, `battery_current`, `cell_min`, `cell_max`, `cell_avg` |
+
+Four InfluxDB buckets: `victron` (30 d raw), `victron_medium` (1 yr × 5 min), `victron_hourly` (∞ × 1 hr), `victron_test` (24 h for CI).
 
 ---
 
