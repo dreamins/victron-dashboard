@@ -113,7 +113,7 @@ MOCK_BATTERY_GARAGE = {
         "fields": {
             "soc": 82.0, "battery_voltage": 13.2, "battery_current": -0.5,
             "cycles": 45.0, "cell_min": 3.28, "cell_max": 3.31,
-            "cell_avg": 3.295, "soh": 97.0, "temperature": 22.0,
+            "cell_avg": 3.295, "soh": 97.0, "temperature": 22.0, "temperature_mosfet": 27.0,
         },
     }
 }
@@ -681,11 +681,12 @@ class TestBmsCard:
         assert "82" in soc_txt or "chg" in soc_txt
 
     def test_bms_card_shows_temperature(self, page: Page, static_server: str):
-        """BMS card shows temperature reading."""
+        """BMS card shows both temperature sensors."""
         page.set_viewport_size({"width": 1280, "height": 900})
         self._load_garage(page, static_server)
         text = page.locator("#cards").inner_text()
-        assert "22" in text  # temperature = 22.0°C
+        assert "22" in text   # temperature = 22.0°C (cell)
+        assert "27" in text   # temperature_mosfet = 27.0°C (MOSFET)
 
 
 class TestBridgeBanner:

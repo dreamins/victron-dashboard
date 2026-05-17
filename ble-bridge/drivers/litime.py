@@ -47,7 +47,8 @@ def parse_litime_frame(data: bytes) -> Optional[Dict[str, float]]:
     soc     = float(u16(90))
     soh     = float(u16(92))
     cycles  = float(u16(96))
-    temp    = float(i8(52))   # cell temperature sensor
+    temp         = float(i8(52))   # NTC1 — cell/environment temperature
+    temp_mosfet  = float(i8(53))   # NTC2 — MOSFET/PCB temperature
 
     cells  = [u16(16 + i * 2) / 1000.0 for i in range(16)]
     active = [v for v in cells if v > 0.0]
@@ -69,6 +70,7 @@ def parse_litime_frame(data: bytes) -> Optional[Dict[str, float]]:
         "soh":                soh,
         "cycles":             cycles,
         "temperature":        temp,
+        "temperature_mosfet": temp_mosfet,
         "cell_min":           cell_min,
         "cell_max":           cell_max,
         "cell_avg":           cell_avg,

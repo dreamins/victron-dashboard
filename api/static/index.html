@@ -1222,6 +1222,7 @@ function renderCards(){
       const delta=(f.cell_max!=null&&f.cell_min!=null)
         ?((f.cell_max-f.cell_min)*1000).toFixed(0)+' mV':'-';
       const btemp=f.temperature!=null?f.temperature.toFixed(1)+' °C':'-';
+      const btemp2=f.temperature_mosfet!=null?f.temperature_mosfet.toFixed(1)+' °C':null;
       const rwh=f.remaining_wh!=null?Math.round(f.remaining_wh)+' Wh':null;
       const barCol=socPct<20?'var(--red)':socPct<50?'var(--amber)':'var(--charge)';
       return `<div class="card${!info?.online?' s-silent':''}${isActive?' active-tab':''}${S.mptts.length%2===0?' card-wide':''}"
@@ -1240,7 +1241,8 @@ function renderCards(){
           <div><div class="m-v">${bv}</div><div class="m-l">Voltage</div></div>
           <div><div class="m-v">${ba}</div><div class="m-l">Current</div></div>
           <div><div class="m-v">${delta}</div><div class="m-l">Cell Delta</div></div>
-          <div><div class="m-v">${btemp}</div><div class="m-l">Temp</div></div>
+          <div><div class="m-v">${btemp}</div><div class="m-l">Cell Temp</div></div>
+          ${btemp2!=null?`<div><div class="m-v">${btemp2}</div><div class="m-l">MOSFET Temp</div></div>`:''}
           <div><div class="m-v">${cycles}</div><div class="m-l">Cycles</div></div>
         </div>
       </div>`;

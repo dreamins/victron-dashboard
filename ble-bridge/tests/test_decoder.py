@@ -326,7 +326,7 @@ import struct as _struct
 
 
 def _make_litime_frame(voltage_mv=13200, current_ma=-2500, soc=85, soh=99,
-                       cycles=15, temp=22, cell_mv=3300, capacity_ah=100,
+                       cycles=15, temp=22, temp_mosfet=25, cell_mv=3300, capacity_ah=100,
                        bad_checksum=False):
     """Build a synthetic 105-byte c_13 response frame for testing."""
     frame = bytearray(105)
@@ -342,6 +342,7 @@ def _make_litime_frame(voltage_mv=13200, current_ma=-2500, soc=85, soh=99,
         _struct.pack_into('<H', frame, 16 + i * 2, cell_mv)
     _struct.pack_into('<i', frame, 48, current_ma)
     frame[52] = temp & 0xFF
+    frame[53] = temp_mosfet & 0xFF
     # [62:64] remaining charge, [64:66] full charge capacity (10 mAh/unit)
     full_ah     = capacity_ah * (soh / 100.0)
     remaining_ah = full_ah * (soc / 100.0)
@@ -403,6 +404,11 @@ class TestLiTimeParser:
         from drivers.litime import parse_litime_frame
         result = parse_litime_frame(_make_litime_frame(temp=-5))
         assert result["temperature"] == -5.0
+
+    def test_temperature_mosfet_correct(self):
+        from drivers.litime import parse_litime_frame
+        result = parse_litime_frame(_make_litime_frame(temp=22, temp_mosfet=28))
+        assert result["temperature_mosfet"] == 28.0
 
     def test_cell_stats_uniform(self):
         from drivers.litime import parse_litime_frame
