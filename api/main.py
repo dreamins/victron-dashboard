@@ -488,17 +488,15 @@ def history(
         range_s = _parse_s(start)
     except ValueError:
         raise HTTPException(400, "invalid start")
+    meas = _device_measurement(site, device)
     if interval is not None:
         iv = interval
     else:
         # Use actual data span so short datasets get fine resolution even on
         # long-range queries (e.g. "All" with only a week of data uses ~30s
         # intervals instead of 12h).
-        meas = _device_measurement(site, device)
         span = repo._actual_span_s(device, field, range_s, site, measurement=meas)
         iv = _auto_interval(span if span else range_s, max_points)
-    else:
-        meas = _device_measurement(site, device)
     return repo.get_history(device, field, range_s, iv, site=site, measurement=meas)
 
 
