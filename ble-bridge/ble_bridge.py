@@ -163,10 +163,26 @@ class BridgeController:
                  len(new_map), len(new_victron), len(new_bms_keys))
 
     async def scan_bms(self) -> list:
-        """Stop scanner, probe all LiTime BMS devices, read one frame, restart scanner."""
+        """Pause BMS pollers + scanner, probe for BMS devices, restart everything.
+
+        Active BMS pollers keep connected devices off-air (connected BLE devices
+        stop advertising). We must cancel them so devices disconnect, wait for them
+        to start advertising again, then scan. All pollers are restarted in finally.
+        """
         from drivers.litime import probe_all_litime
 
         was_running = await _scanner_stop()
+
+        # Cancel active BMS pollers so connected batteries disconnect and advertise
+        paused_keys = list(self._bms_tasks.keys())
+        for key in paused_keys:
+            t = self._bms_tasks.pop(key, None)
+            if t and not t.done():
+                t.cancel()
+        if paused_keys:
+            log.info("scan-bms: paused %d BMS poller(s), waiting for BLE disconnect...", len(paused_keys))
+            await asyncio.sleep(4.0)  # allow BMS devices to disconnect + start advertising
+
         if was_running:
             await asyncio.sleep(0.5)
 
@@ -194,6 +210,13 @@ class BridgeController:
                     "temp":        frame.get("temperature"),
                 })
         finally:
+            # Restart BMS pollers for all configured BMS devices
+            for info in self._bms_list(self.device_map):
+                key = self._bms_key(info)
+                if key not in self._bms_tasks or self._bms_tasks[key].done():
+                    self._bms_tasks[key] = asyncio.create_task(run_bms_poller(info, self.writer))
+            if paused_keys:
+                log.info("scan-bms: restarted %d BMS poller(s)", len(paused_keys))
             if was_running:
                 await _scanner_start()
 

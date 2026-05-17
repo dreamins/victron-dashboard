@@ -272,32 +272,21 @@ except Exception as e:
         || fail "T8b: expected 404 for nonexistent site, got: $SCAN_NONE"
 fi
 
-# ── T9: dashboard contains Phase 12 JS ────────────────────────────────────────
+# ── T9: dashboard contains Phase 12 JS (grep container file — avoids HTTP truncation) ──
 if [ -n "$API_CONTAINER" ]; then
-    HTML=$(docker exec "$API_CONTAINER" \
-        python3 -c "
-import urllib.request
-r = urllib.request.urlopen('http://localhost:8080/', timeout=5)
-print(r.read().decode('utf-8', errors='ignore')[:60000])
-" 2>/dev/null || echo "")
+    _grep_html() { docker exec "$API_CONTAINER" grep -q "$1" /app/static/index.html 2>/dev/null; }
 
-    if echo "$HTML" | grep -q "openSettings"; then
-        pass "T9: index.html contains openSettings() — Phase 12 JS deployed"
-    else
-        fail "T9: index.html missing openSettings() — old version still served"
-    fi
+    _grep_html "openSettings" \
+        && pass "T9: index.html contains openSettings() — Phase 12 JS deployed" \
+        || fail "T9: index.html missing openSettings() — old version still served"
 
-    if echo "$HTML" | grep -q "renderSettingsPanel"; then
-        pass "T9b: index.html contains renderSettingsPanel()"
-    else
-        fail "T9b: index.html missing renderSettingsPanel()"
-    fi
+    _grep_html "renderSettingsPanel" \
+        && pass "T9b: index.html contains renderSettingsPanel()" \
+        || fail "T9b: index.html missing renderSettingsPanel()"
 
-    if echo "$HTML" | grep -q "settings-gear"; then
-        pass "T9c: index.html contains settings gear button"
-    else
-        fail "T9c: index.html missing settings gear button"
-    fi
+    _grep_html "settings-gear" \
+        && pass "T9c: index.html contains settings gear button" \
+        || fail "T9c: index.html missing settings gear button"
 fi
 
 # ── T10: device add → sites.json written → ble-bridge reload triggered ────────
@@ -442,11 +431,13 @@ ENV_MD5_AFTER=$(md5sum .env 2>/dev/null | cut -d' ' -f1 || echo "")
     && pass "T13b: setup.sh re-run did not modify .env" \
     || fail "T13b: setup.sh modified .env on re-run"
 
-# ── T14: pre-commit hook installed and blocks MACs ────────────────────────────
-if [ -f ".git/hooks/pre-commit" ] && [ -x ".git/hooks/pre-commit" ]; then
+# ── T14: pre-commit hook (developer machine feature — skip if no .git) ───────
+if [ ! -d ".git" ]; then
+    warn "T14: no .git directory on this server — pre-commit hook is a dev-machine feature, skipping"
+elif [ -f ".git/hooks/pre-commit" ] && [ -x ".git/hooks/pre-commit" ]; then
     pass "T14: .git/hooks/pre-commit installed and executable"
 else
-    fail "T14: .git/hooks/pre-commit missing or not executable — run: bash setup.sh"
+    fail "T14: .git/hooks/pre-commit missing — run: bash setup.sh"
 fi
 
 # Test MAC detection logic without staging real files

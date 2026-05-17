@@ -2,6 +2,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import tempfile
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Tuple
@@ -108,19 +109,29 @@ def _load_sites_raw() -> dict:
 
 
 def _write_sites_atomic(data: dict) -> None:
-    """Write sites.json atomically via a temp file + os.replace()."""
+    """Write sites.json safely: validate serialization via a temp file, then overwrite.
+
+    os.replace() fails with EBUSY on Docker bind-mounted files (the mount point is
+    pinned and cannot be replaced by rename). shutil.copy2 writes in-place to the
+    existing inode, which works on bind mounts.
+    """
     path = pathlib.Path(SITES_FILE)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2)
-        os.replace(tmp, str(path))
+        shutil.copy2(tmp, str(path))
     except Exception:
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
+    else:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 async def _bridge_reload() -> None:
