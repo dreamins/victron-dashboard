@@ -33,7 +33,7 @@ async def _health(request: web.Request) -> web.Response:
 async def _scan_bms(request: web.Request) -> web.Response:
     controller = request.app["controller"]
     try:
-        results = await asyncio.wait_for(controller.scan_bms(), timeout=60.0)
+        results = await asyncio.wait_for(controller.scan_bms(), timeout=90.0)
         return web.json_response(results)
     except asyncio.TimeoutError:
         return web.json_response({"error": "scan timed out"}, status=504)

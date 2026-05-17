@@ -155,12 +155,16 @@ async def probe_all_litime(scan_timeout: float = 10.0,
     adapter_kw = {"bluez": {"adapter": adapter}} if adapter else {}
     devices = await BleakScanner.discover(timeout=scan_timeout, **adapter_kw)
     log.info("Found %d BLE device(s), probing each...", len(devices))
-    results = []
-    for device in devices:
-        log.debug("Probing %s (%s)", device.address, device.name or "?")
-        result = await _probe_device(device.address, probe_timeout, adapter)
-        if result:
-            results.append(result)
+    # Probe up to 4 devices concurrently — sequential probing of 15+ devices
+    # can take 40s+ and blow past the scan timeout.
+    sem = asyncio.Semaphore(4)
+
+    async def _probe_with_sem(device):
+        async with sem:
+            return await _probe_device(device.address, probe_timeout, adapter)
+
+    raw = await asyncio.gather(*[_probe_with_sem(d) for d in devices], return_exceptions=True)
+    results = [r for r in raw if isinstance(r, tuple)]
     log.info("LiTime probe complete: %d BMS device(s) found", len(results))
     return results
 

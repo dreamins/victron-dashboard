@@ -460,14 +460,27 @@ rm -f "$TEMP_HOOK_TEST"
 if $SKIP_SCAN; then
     warn "T15: BLE scan test SKIPPED (SKIP_SCAN=true)"
 elif [ -n "$BLE_SITE" ] && [ -n "$API_CONTAINER" ]; then
+    # Wait for BMS to finish initial UUID probe and start actively polling.
+    # probe_all_litime (called by BMS poller on first connect) takes ~20s;
+    # triggering scan_bms before it finishes causes BlueZ InProgress errors.
+    info "T15: Waiting for BMS to start polling (UUID probe takes ~20s)..."
+    BMS_READY=false
+    for i in $(seq 1 90); do
+        docker logs "$BLE_CONTAINER" 2>&1 | grep -q "battery SOC=" && BMS_READY=true && break
+        sleep 1
+    done
+    if ! $BMS_READY; then
+        warn "T15: BMS did not start polling within 90s — skipping BLE scan test"
+    fi
+
     echo ""
-    info "T15: Running BLE scan — stops Victron scanner for ~30s, restarts after"
+    info "T15: Running BLE scan — stops Victron scanner and BMS poller for ~30s, restarts after"
     SCAN_RESULT=$(docker exec "$API_CONTAINER" python3 -c "
 import urllib.request, json
 try:
     r = urllib.request.urlopen(
         'http://localhost:8080/api/v1/scan/bms?site=${BLE_SITE}',
-        timeout=70
+        timeout=110
     )
     data = json.loads(r.read())
     print(json.dumps(data))

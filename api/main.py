@@ -489,7 +489,7 @@ def daily(
 @app.get("/api/v1/scan/bms")
 async def scan_bms(site: str = Query(...)):
     """Proxy a BMS discovery scan to ble-bridge. Returns found devices with live SOC/V/temp.
-    Only valid for sites with bridge=ble. Takes up to ~55 s."""
+    Only valid for sites with bridge=ble. Takes up to ~35 s (parallel probe)."""
     all_sites = _load_sites_config()
     s = next((x for x in all_sites if x["id"] == site), None)
     if s is None:
@@ -498,7 +498,7 @@ async def scan_bms(site: str = Query(...)):
         raise HTTPException(400, "site does not use a BLE bridge — scan not available")
     if not BLE_BRIDGE_URL:
         raise HTTPException(503, "BLE_BRIDGE_URL not configured")
-    async with httpx.AsyncClient(timeout=65.0) as client:
+    async with httpx.AsyncClient(timeout=100.0) as client:
         try:
             resp = await client.post(f"{BLE_BRIDGE_URL}/scan-bms")
             resp.raise_for_status()
