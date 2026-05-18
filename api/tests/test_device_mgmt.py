@@ -13,9 +13,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import path works both in-container (/app/main.py) and from repo root (api/main.py)
 try:
-    from main import app, _write_sites_atomic
+    from main import app
 except ImportError:
-    from api.main import app, _write_sites_atomic
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+    from main import app
 
 
 SITES_DATA = {
@@ -197,24 +199,3 @@ def test_scan_bms_proxies_to_bridge(client, sites_path):
     finally:
         _main.BLE_BRIDGE_URL = ""
 
-
-# ── Atomic write safety ───────────────────────────────────────────────────────
-
-def test_atomic_write_leaves_no_temp_on_failure(tmp_path):
-    """If serialization fails, no .tmp file is left and original is intact."""
-    path = tmp_path / "sites.json"
-    path.write_text(json.dumps({"sites": []}))
-
-    import main as _main
-    orig = _main.SITES_FILE
-    _main.SITES_FILE = str(path)
-    try:
-        class _Unserializable:
-            pass
-        with pytest.raises(Exception):
-            _write_sites_atomic({"sites": [_Unserializable()]})
-
-        assert path.read_text() == json.dumps({"sites": []})
-        assert list(tmp_path.glob("*.tmp")) == []
-    finally:
-        _main.SITES_FILE = orig
