@@ -271,3 +271,34 @@ def test_poller_writes_battery_point():
 
     _run(_go())
     assert len(writer.written) >= 1
+
+
+# ── Disconnect exception regression ──────────────────────────────────────────
+
+def test_poller_survives_disconnect_exception():
+    """Regression: bms.disconnect() raising in the finally block must NOT kill
+    the poller.  Before the fix, the exception escaped the finally, blew past
+    the while-loop, and the BMS never retried — producing a permanent bridge-
+    offline state with only a one-liner error in the logs."""
+    _reset()
+
+    class _FailingDisconnectBMS(_MockBMS):
+        async def disconnect(self):
+            self.disconnect_calls += 1
+            self._connected = False
+            raise OSError("BlueZ disconnect error (injected)")
+
+    bms    = _FailingDisconnectBMS("AA:BB:CC:DD:EE:FF", disconnect_after_polls=1)
+    writer = _MockWriter()
+
+    async def _go():
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await run_bms_poller(BMS_INFO, writer,
+                                 bms_factory=lambda m: bms,
+                                 _max_cycles=2)
+
+    _run(_go())
+    assert bms.connect_calls == 2, (
+        f"Poller should have retried after disconnect exception, "
+        f"but connect was only called {bms.connect_calls} time(s)."
+    )

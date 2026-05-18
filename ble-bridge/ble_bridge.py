@@ -120,7 +120,10 @@ async def _read_one_bms_frame(address: str, write_uuid: str,
         await bms.poll()
         await asyncio.wait_for(ev.wait(), timeout=8.0)
     finally:
-        await bms.disconnect()
+        try:
+            await bms.disconnect()
+        except Exception:
+            pass
     return result
 
 
@@ -484,8 +487,14 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter,
                       site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
         finally:
             if scan_was_running:
-                await _scanner_start()
-            await bms.disconnect()
+                try:
+                    await _scanner_start()
+                except Exception:
+                    pass
+            try:
+                await bms.disconnect()
+            except Exception:
+                pass
 
         cycles += 1
         delay = _BMS_BACKOFF[backoff_idx]
