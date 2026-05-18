@@ -230,23 +230,33 @@ class BridgeController:
                  len(new_map), len(new_victron), len(new_bms_keys))
 
     async def scan_bms(self) -> list:
-        """Pause BMS pollers + scanner, probe for BMS devices, restart."""
+        """Probe for new (unconfigured) BMS devices; leave existing pollers running.
+
+        Only unconfigured BMS pollers (key starts with '_', no MAC yet) are
+        cancelled — they haven't connected to anything so no disconnect delay
+        is needed.  Configured BMS devices stay connected and won't appear in
+        BLE advertising, so the probe naturally ignores them.
+        """
         from drivers.litime import probe_all_litime
 
         was_running = await _scanner_stop()
 
+        # Cancel only unconfigured pollers (key = "_site_device", no MAC).
+        # Configured pollers keep running — their BMS stays connected and
+        # invisible to the probe scan, which is exactly what we want.
         paused_tasks = []
-        paused_keys  = list(self._bms_tasks.keys())
-        for key in paused_keys:
+        paused_keys  = []
+        for key in list(self._bms_tasks.keys()):
+            if not key.startswith("_"):
+                continue  # configured (MAC-keyed) — leave running
             t = self._bms_tasks.pop(key, None)
             if t and not t.done():
                 t.cancel()
                 paused_tasks.append(t)
+                paused_keys.append(key)
         if paused_tasks:
-            log.info("scan-bms: paused %d BMS poller(s)", len(paused_tasks))
+            log.info("scan-bms: paused %d unconfigured BMS poller(s)", len(paused_tasks))
             await asyncio.gather(*paused_tasks, return_exceptions=True)
-            # LiTime BMS needs ~20s after forced disconnect before advertising again.
-            await asyncio.sleep(20.0)
 
         if was_running:
             await asyncio.sleep(0.5)
