@@ -400,11 +400,11 @@ class TestLFPSoc:
 class TestLoadPaths:
     def test_load_path1_endpoint(self, desktop):
         d = desktop.locator("#path-mppt1-load").get_attribute("d") or ""
-        assert "55,266" in d or "55" in d, f"Expected path to end near circle edge, got: {d}"
+        assert "65,265" in d or "65" in d, f"Expected path to end near circle edge, got: {d}"
 
     def test_load_path2_endpoint(self, desktop):
         d = desktop.locator("#path-mppt2-load").get_attribute("d") or ""
-        assert "445,266" in d or "445" in d, f"Expected path to end near circle edge, got: {d}"
+        assert "435,265" in d or "435" in d, f"Expected path to end near circle edge, got: {d}"
 
 
 class TestTodayYield:

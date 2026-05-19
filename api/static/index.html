@@ -971,8 +971,8 @@ function _buildFlowSvg(){
     if(N<=1) return BT_X+BW/2;
     return Math.round(BT_X+22+i*(BW-44)/(N-1));
   }
-  // Load node: offset 58px outside outermost MPPT; circle at LOAD_CY=BT_Y+38=286
-  const LOAD_OFFSET=58, LOAD_R=24, LOAD_CY=BT_Y+38;
+  // Load node offset 46px gives circle left/right edge 30px inside SVG edge (10px clear of PAD=20)
+  const LOAD_OFFSET=46, LOAD_R=24, LOAD_CY=BT_Y+38;
   function loadCircleCX(i){ return i===0?mpptCX(0)-LOAD_OFFSET:mpptCX(N-1)+LOAD_OFFSET; }
 
   let h=`<defs>
@@ -1078,8 +1078,9 @@ function _updateFlowValues(){
     const id=S.mptts[i];
     const d=S.current[id];
     const lbl=d?.label||S.devices.find(x=>x.id===id)?.label||'-';
-    setText(`pv${i+1}-label`,lbl);
-    setText(`mppt${i+1}-label`,lbl);
+    const svgLbl=lbl.length>13?lbl.slice(0,12)+'…':lbl;
+    setText(`pv${i+1}-label`,svgLbl);
+    setText(`mppt${i+1}-label`,svgLbl);
     setPvNode(i+1,d);
     updateMpptNode(i+1,d);
     setLoadNode(i+1,d);
@@ -1121,7 +1122,8 @@ function _updateFlowValues(){
   for(let m=0;m<S.chargers.length;m++){
     const id=S.chargers[m], cDev=S.current[id], cF=cDev?.fields||{};
     const cs=Math.round(cF.charge_state??0), st=STATES[cs]||STATES[0], cc=cF.charge_current??0;
-    setText(`charger-label-${m}`,cDev?.label||S.devices.find(d=>d.id===id)?.label||id);
+    const cLbl=cDev?.label||S.devices.find(d=>d.id===id)?.label||id;
+    setText(`charger-label-${m}`,cLbl.length>13?cLbl.slice(0,12)+'…':cLbl);
     const sTxt=document.getElementById(`charger-status-txt-${m}`);
     const sBg=document.getElementById(`charger-status-bg-${m}`);
     const cBox=document.getElementById(`charger-box-${m}`);
