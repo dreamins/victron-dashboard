@@ -12,6 +12,7 @@ Run:
 """
 import json
 import pytest
+from datetime import datetime, timezone
 from playwright.sync_api import Page, expect
 
 # ── Mock data ────────────────────────────────────────────────────────────────
@@ -108,7 +109,22 @@ MOCK_CURRENT_GARAGE = {
     },
 }
 
+_NOW_ISO = datetime.now(timezone.utc).isoformat()
+
 MOCK_BATTERY_GARAGE = {
+    "garage_bms": {
+        "device": "garage_bms",
+        "label": "Garage LiTime",
+        "ts": _NOW_ISO,
+        "fields": {
+            "soc": 82.0, "battery_voltage": 13.2, "battery_current": -0.5,
+            "cycles": 45.0, "cell_min": 3.28, "cell_max": 3.31,
+            "cell_avg": 3.295, "soh": 97.0, "temperature": 22.0, "temperature_mosfet": 27.0,
+        },
+    }
+}
+
+MOCK_BATTERY_GARAGE_STALE = {
     "garage_bms": {
         "device": "garage_bms",
         "label": "Garage LiTime",
@@ -690,6 +706,44 @@ class TestBmsCard:
         text = page.locator("#cards").inner_text()
         assert "22" in text   # temperature = 22.0°C (cell)
         assert "27" in text   # temperature_mosfet = 27.0°C (MOSFET)
+
+    def test_bms_card_not_grey_when_battdata_recent(self, page: Page, static_server: str):
+        """BMS card has no s-silent class when battData.ts is within 90 seconds."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        self._load_garage(page, static_server)
+        assert page.locator("#cards .card.s-silent").count() == 0
+
+    def test_bms_card_grey_when_battdata_stale(self, page: Page, static_server: str):
+        """BMS card gets s-silent class when battData.ts is older than 90 seconds."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        _setup_mocks(
+            page,
+            sites=MOCK_SITES_MULTI,
+            devices=MOCK_DEVICES_GARAGE,
+            current=MOCK_CURRENT_GARAGE,
+            battery=MOCK_BATTERY_GARAGE_STALE,
+        )
+        page.add_init_script("localStorage.setItem('victron_selected_site', 'garage')")
+        page.goto(f"{static_server}/index.html")
+        page.wait_for_selector("#cards .card", timeout=6000)
+        assert page.locator("#cards .card.s-silent").count() == 1
+
+    def test_load_power_chart_absent_for_no_load_site(self, page: Page, static_server: str):
+        """Garage (show_loads=False) MPPT panel has no Load Power chart."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        self._load_garage(page, static_server)
+        page.locator(".tab-btn").first.click()
+        page.wait_for_timeout(300)
+        titles = page.locator(".chart-panel.active .chart-title").all_text_contents()
+        assert "Load Power" not in titles
+
+    def test_bms_charging_sign_convention(self, page: Page, static_server: str):
+        """Flow shows 'chg' when battery_current is negative (charging)."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        self._load_garage(page, static_server)
+        # battery_current=-0.5 → charging=true → flow-batt-soc shows "chg"
+        soc_txt = page.locator("#flow-batt-soc").text_content() or ""
+        assert "chg" in soc_txt
 
 
 class TestTemperatureChart:

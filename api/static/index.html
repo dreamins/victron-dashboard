@@ -889,7 +889,7 @@ function buildTabDefs(){
           <div class="chart-card"><div class="chart-title">PV Voltage</div><div class="chart-container"><canvas id="chart-${i}-pv"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Charge Current</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Battery Voltage</div><div class="chart-container"><canvas id="chart-${i}-v"></canvas></div></div>
-          <div class="chart-card"><div class="chart-title">Load Power</div><div class="chart-container"><canvas id="chart-${i}-l"></canvas></div></div>
+          ${S.siteUi?.show_loads!==false?`<div class="chart-card"><div class="chart-title">Load Power</div><div class="chart-container"><canvas id="chart-${i}-l"></canvas></div></div>`:''}
         </div>`;
       if(d.kind==='battery') return `
         <div id="panel-${i}" class="chart-panel ${active}">
@@ -1094,7 +1094,7 @@ function _updateFlowValues(){
     const bmsF=S.battData[S.bmsDevice]?.fields||{};
     S.bvolt=bmsF.battery_voltage??m0?.fields?.battery_voltage??m1?.fields?.battery_voltage??null;
     S.bsoc=bmsF.soc??null;
-    const charging=bmsF.battery_current!=null&&bmsF.battery_current>0.1;
+    const charging=bmsF.battery_current!=null&&bmsF.battery_current<-0.1;
     setText('flow-batt-v',S.bvolt!=null?S.bvolt.toFixed(2)+' V':'-');
     setText('flow-batt-soc',charging?'chg':(S.bsoc!=null?S.bsoc.toFixed(0)+'%':'-'));
     setText('flow-batt-t','');
@@ -1322,7 +1322,8 @@ function renderCards(){
       const btemp2=f.temperature_mosfet!=null?f.temperature_mosfet.toFixed(1)+' °C':null;
       const rwh=f.remaining_wh!=null?Math.round(f.remaining_wh)+' Wh':null;
       const barCol=socPct<20?'var(--red)':socPct<50?'var(--amber)':'var(--charge)';
-      return `<div class="card${!info?.online?' s-silent':''}${isActive?' active-tab':''}${S.mptts.length%2===0?' card-wide':''}"
+      const bmsOnline=bmsData.ts?(Date.now()-new Date(bmsData.ts).getTime())<90000:false;
+      return `<div class="card${!bmsOnline?' s-silent':''}${isActive?' active-tab':''}${S.mptts.length%2===0?' card-wide':''}"
                    onclick="switchTab(${tabIdx})" style="padding-top:22px">
         <div class="card-accent" style="background:var(--batt)"></div>
         <div class="c-label">${bmsData.label||'Battery'}</div>
@@ -1403,7 +1404,8 @@ async function updateCharts(){
     await drawLine(`chart-${S.tab}-pv`,id,'pv_voltage',     rng.st,'#a78bfa',' V');
     await drawLine(`chart-${S.tab}-c`, id,'charge_current', rng.st,'#10b981',' A');
     await drawLine(`chart-${S.tab}-v`, id,'battery_voltage',rng.st,'#00f2ff',' V');
-    await drawLine(`chart-${S.tab}-l`, id,'load_power',     rng.st,'#f97316',wTick);
+    if(S.siteUi?.show_loads!==false)
+      await drawLine(`chart-${S.tab}-l`, id,'load_power',     rng.st,'#f97316',wTick);
   } else if(def.kind==='battery'){
     const voltIds=[...(S.bsense?[S.bsense]:[]),...S.mptts];
     await drawMulti(`chart-${S.tab}-v`,voltIds,'battery_voltage',rng.st,' V');
