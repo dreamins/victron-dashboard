@@ -23,7 +23,9 @@ import logging
 import os
 import pathlib
 import signal
+import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Callable, Dict, Any, Optional
@@ -63,6 +65,64 @@ _bms_seen_events: Dict[str, asyncio.Event] = {}
 # Populated by run_ble_scanner callback; read by scan_victron() without stopping the scanner.
 _victron_seen_cache: Dict[str, Dict] = {}
 
+# device_id → monotonic timestamp of last BMS poller activity (set inside the loop body).
+# Read by the thread watchdog — survives a frozen asyncio event loop.
+_poller_heartbeat: Dict[str, float] = {}
+_BT_DEAD_S  = 300   # 5 min with no poller activity → BT is considered frozen
+_BT_KILL_S  = 600   # 10 min → give up, let Docker restart us
+
+
+def _bt_watchdog_thread() -> None:
+    """OS thread: hard-reset BlueZ when a BMS poller freezes the event loop.
+
+    asyncio.wait_for() cannot rescue a deadlocked bleak D-Bus call because
+    BlueZ's D-Bus response never arrives, so the coroutine never reaches a
+    yield point for the cancellation to land.  A separate OS thread is the
+    only layer that can still run and take action.
+
+    Recovery ladder:
+      1. > _BT_DEAD_S without poller activity → hciconfig reset (soft reset)
+      2. > _BT_KILL_S without poller activity → SIGTERM to self (Docker restarts)
+    """
+    adapter      = BLE_ADAPTER or "hci0"
+    reset_done   = False
+    reset_time   = 0.0
+
+    while True:
+        time.sleep(60)
+        if not _poller_heartbeat:
+            continue  # no BMS devices configured yet
+
+        now      = time.monotonic()
+        stuck_id = None
+        stuck_s  = 0.0
+        for dev_id, last_t in list(_poller_heartbeat.items()):
+            gap = now - last_t
+            if gap > stuck_s:
+                stuck_s  = gap
+                stuck_id = dev_id
+
+        if stuck_s <= _BT_DEAD_S:
+            reset_done = False
+            continue
+
+        if not reset_done:
+            log.error("BMS poller [%s] silent for %.0fs — hard-resetting %s",
+                      stuck_id, stuck_s, adapter)
+            try:
+                subprocess.run(["hciconfig", adapter, "reset"],
+                               timeout=10, check=False, capture_output=True)
+                log.info("hciconfig %s reset complete", adapter)
+            except Exception as exc:
+                log.error("hciconfig reset failed: %s", exc)
+            reset_done = True
+            reset_time = now
+        elif now - reset_time > _BT_KILL_S - _BT_DEAD_S:
+            log.error("BMS still frozen after reset — sending SIGTERM for Docker restart")
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(15)
+            sys.exit(1)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -89,7 +149,7 @@ async def _scanner_stop() -> bool:
     if _victron_scanner is None:
         return False
     try:
-        await _victron_scanner.stop()
+        await asyncio.wait_for(_victron_scanner.stop(), timeout=10.0)
         return True
     except Exception:
         return False
@@ -99,7 +159,7 @@ async def _scanner_start() -> None:
     if _victron_scanner is None:
         return
     try:
-        await _victron_scanner.start()
+        await asyncio.wait_for(_victron_scanner.start(), timeout=10.0)
     except Exception:
         pass
 
@@ -418,14 +478,14 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter,
         scanner = BleakScanner(detection_callback=_callback, **adapter_kw)
 
     _victron_scanner = scanner
-    await scanner.start()
+    await asyncio.wait_for(scanner.start(), timeout=30.0)
     try:
         while True:
             await asyncio.sleep(3600)
     finally:
         _victron_scanner = None
         try:
-            await scanner.stop()
+            await asyncio.wait_for(scanner.stop(), timeout=10.0)
         except Exception:
             pass
 
@@ -485,6 +545,7 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter,
     bms.on_data_callback = _on_data
 
     while _max_cycles is None or cycles < _max_cycles:
+        _poller_heartbeat[dev_id] = time.monotonic()  # watchdog proof-of-life
         if mac:
             log.info("[%s/%s] waiting for BMS in scan...", site_id, dev_id)
             seen = await _wait_for_bms_in_scan(mac, timeout=300.0)
@@ -513,6 +574,7 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter,
             await asyncio.wait_for(bms.connect(), timeout=30.0)
             connected_ok = True
             backoff_idx  = 0
+            _poller_heartbeat[dev_id] = time.monotonic()
 
             if not mac and bms.address:
                 mac = bms.address
@@ -528,10 +590,12 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter,
             scan_was_running = False
 
             while bms.is_connected:
-                await bms.poll()
+                await asyncio.wait_for(bms.poll(), timeout=15.0)
+                _poller_heartbeat[dev_id] = time.monotonic()
                 await asyncio.sleep(5)
             log.info("[%s/%s] BMS disconnected", site_id, dev_id)
         except Exception as e:
+            _poller_heartbeat[dev_id] = time.monotonic()  # error = still alive
             log.error("[%s/%s] BMS error: %s — retry in %ds",
                       site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
         finally:
@@ -595,6 +659,9 @@ async def run_production(device_map: Dict[str, Any], writer: InfluxWriter) -> No
     if not device_map:
         log.warning("No devices configured")
         return
+
+    wd = threading.Thread(target=_bt_watchdog_thread, name="bt-watchdog", daemon=True)
+    wd.start()
 
     controller = BridgeController(device_map, writer)
     controller.start()

@@ -13,6 +13,7 @@ Covers:
 import asyncio
 import os
 import sys
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,7 +21,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import ble_bridge
-from ble_bridge import run_bms_poller
+from ble_bridge import run_bms_poller, _bt_watchdog_thread
 
 
 BMS_INFO = {
@@ -89,6 +90,7 @@ def _reset():
     ble_bridge._victron_scanner = None
     ble_bridge._bms_seen_events.clear()
     ble_bridge._last_written.clear()
+    ble_bridge._poller_heartbeat.clear()
 
 
 def _run(coro):
@@ -273,6 +275,65 @@ def test_poller_writes_battery_point():
     assert len(writer.written) >= 1
 
 
+# ── Poll timeout ─────────────────────────────────────────────────────────────
+
+def test_poller_poll_timeout_triggers_reconnect():
+    """If poll() deadlocks (BlueZ notification hang), asyncio.wait_for raises
+    TimeoutError which breaks the poll loop and triggers a reconnect cycle."""
+    _reset()
+    writer      = _MockWriter()
+    sleep_calls = []
+
+    class _HangingPollBMS(_MockBMS):
+        async def poll(self):
+            self.poll_calls += 1
+            raise asyncio.TimeoutError("injected poll timeout")
+
+    bms = _HangingPollBMS("AA:BB:CC:DD:EE:FF")
+
+    async def _fake_sleep(t):
+        sleep_calls.append(t)
+
+    async def _go():
+        with patch("asyncio.sleep", side_effect=_fake_sleep):
+            await run_bms_poller(BMS_INFO, writer,
+                                 bms_factory=lambda m: bms,
+                                 _max_cycles=2)
+
+    _run(_go())
+    assert bms.connect_calls == 2, (
+        f"Poller should reconnect after poll timeout, got {bms.connect_calls} connects"
+    )
+    assert 5 in sleep_calls, f"Expected 5s backoff after poll timeout, got: {sleep_calls}"
+
+
+def test_poller_disconnect_timeout_is_swallowed():
+    """If disconnect() deadlocks, TimeoutError is swallowed in the finally block —
+    the poller must not crash and must retry the connect cycle."""
+    _reset()
+
+    class _HangingDisconnectBMS(_MockBMS):
+        async def disconnect(self):
+            self.disconnect_calls += 1
+            self._connected = False
+            raise asyncio.TimeoutError("injected disconnect timeout")
+
+    bms    = _HangingDisconnectBMS("AA:BB:CC:DD:EE:FF", disconnect_after_polls=1)
+    writer = _MockWriter()
+
+    async def _go():
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await run_bms_poller(BMS_INFO, writer,
+                                 bms_factory=lambda m: bms,
+                                 _max_cycles=2)
+
+    _run(_go())
+    assert bms.connect_calls == 2, (
+        f"Poller should retry after disconnect timeout, "
+        f"but connect was only called {bms.connect_calls} time(s)."
+    )
+
+
 # ── Connect timeout ───────────────────────────────────────────────────────────
 
 def test_poller_connect_timeout_triggers_retry():
@@ -335,3 +396,85 @@ def test_poller_survives_disconnect_exception():
         f"Poller should have retried after disconnect exception, "
         f"but connect was only called {bms.connect_calls} time(s)."
     )
+
+
+# ── Watchdog ──────────────────────────────────────────────────────────────────
+
+def test_poller_updates_heartbeat_on_success():
+    """_poller_heartbeat[dev_id] must be updated after a successful poll."""
+    _reset()
+    bms    = _MockBMS("AA:BB:CC:DD:EE:FF")
+    writer = _MockWriter()
+
+    async def _go():
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await run_bms_poller(BMS_INFO, writer,
+                                 bms_factory=lambda m: bms,
+                                 _max_cycles=1)
+
+    _run(_go())
+    assert BMS_INFO["device_id"] in ble_bridge._poller_heartbeat, (
+        "_poller_heartbeat was not updated by poller"
+    )
+    assert ble_bridge._poller_heartbeat[BMS_INFO["device_id"]] > 0
+
+
+def test_poller_updates_heartbeat_on_error():
+    """_poller_heartbeat must also update on connection failure so the watchdog
+    doesn't trigger a hard reset for ordinary 'device not found' errors."""
+    _reset()
+    bms    = _MockBMS("AA:BB:CC:DD:EE:FF", fail_first_n=999)
+    writer = _MockWriter()
+
+    async def _go():
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await run_bms_poller(BMS_INFO, writer,
+                                 bms_factory=lambda m: bms,
+                                 _max_cycles=1)
+
+    before = time.monotonic()
+    _run(_go())
+    after  = time.monotonic()
+    ts = ble_bridge._poller_heartbeat.get(BMS_INFO["device_id"], 0.0)
+    assert before <= ts <= after + 1, (
+        "Heartbeat timestamp not updated on connection error"
+    )
+
+
+def test_watchdog_resets_adapter_when_poller_frozen(monkeypatch):
+    """Watchdog thread: if _poller_heartbeat is stale > _BT_DEAD_S,
+    it must run hciconfig reset exactly once, then stop when heartbeat recovers."""
+    _reset()
+    # Inject a stale timestamp so the watchdog fires on the very first check.
+    ble_bridge._poller_heartbeat["test_bms"] = (
+        time.monotonic() - ble_bridge._BT_DEAD_S - 10
+    )
+    reset_calls = []
+    sleep_count = [0]
+
+    def _fake_run(cmd, **kw):
+        reset_calls.append(cmd)
+        class _R: returncode = 0
+        return _R()
+
+    def _fake_sleep(t):
+        sleep_count[0] += 1
+        if sleep_count[0] == 2:
+            # After the reset iteration, refresh heartbeat so next check is clean.
+            ble_bridge._poller_heartbeat["test_bms"] = time.monotonic()
+        if sleep_count[0] >= 3:
+            # Two checks ran — stop the infinite loop via exception.
+            raise RuntimeError("watchdog-test-stop")
+
+    monkeypatch.setattr(time, "sleep", _fake_sleep)
+    monkeypatch.setattr("ble_bridge.subprocess.run", _fake_run)
+
+    try:
+        _bt_watchdog_thread()
+    except RuntimeError as e:
+        assert str(e) == "watchdog-test-stop"
+
+    assert any("hciconfig" in str(c) for c in reset_calls), (
+        f"Expected hciconfig reset call, got: {reset_calls}"
+    )
+    assert len(reset_calls) == 1, f"Expected exactly one reset, got: {reset_calls}"
