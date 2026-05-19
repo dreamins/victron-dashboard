@@ -282,6 +282,50 @@ def test_get_history_returns_deduped_sorted_points():
     assert len(times) == len(set(times))  # deduped
 
 
+# ── get_bridge_alive / heartbeat ─────────────────────────────────────────────
+
+def test_get_bridge_alive_returns_true_when_recent_heartbeat():
+    now = datetime.now(timezone.utc)
+    rec = _Rec(now - timedelta(seconds=20), value=1, field="ok",
+               device=None, label=None)
+    rec.values = {}  # heartbeat has no device/label tags
+    repo, qa = _make_repo([_Table(rec)])
+    assert repo.get_bridge_alive("garage") is True
+    q = qa.query.call_args[0][0]
+    assert "ble_bridge_alive" in q
+    assert "garage" in q
+
+
+def test_get_bridge_alive_returns_false_when_no_heartbeat():
+    repo, _ = _make_repo([])  # empty result
+    assert repo.get_bridge_alive("garage") is False
+
+
+def test_get_bridge_alive_returns_false_on_query_error():
+    qa = MagicMock()
+    qa.query.side_effect = Exception("influx down")
+    repo = InfluxRepository(qa, "b", "bm", "bh")
+    assert repo.get_bridge_alive("garage") is False
+
+
+def test_get_devices_bridge_online_via_heartbeat():
+    """Stale device data + fresh heartbeat → bridge_online True."""
+    now   = datetime.now(timezone.utc)
+    stale = now - timedelta(seconds=BRIDGE_S + 60)
+    rec   = _Rec(stale, device="mppt1", label="MPPT 1")
+    hb    = _Rec(now - timedelta(seconds=20), value=1, field="ok")
+    hb.values = {}
+
+    qa = MagicMock()
+    # First call: get_devices solar query (stale)
+    # Second call: get_bridge_alive heartbeat query (fresh)
+    qa.query.side_effect = [[_Table(rec)], [_Table(hb)]]
+    repo = InfluxRepository(qa, "b", "bm", "bh")
+
+    result = repo.get_devices(site="garage")
+    assert result["bridge_online"] is True
+
+
 # ── get_battery ───────────────────────────────────────────────────────────────
 
 def test_get_battery_groups_fields_by_device():

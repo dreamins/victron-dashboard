@@ -24,6 +24,13 @@ def _make_point(device_id: str, label: str, site_id: str,
     return p
 
 
+def _make_heartbeat_point(site_id: str, ts: datetime) -> Point:
+    return (Point("ble_bridge_alive")
+            .tag("site", site_id)
+            .field("ok", 1)
+            .time(ts))
+
+
 def _make_battery_point(device_id: str, label: str, site_id: str,
                         ts: datetime, fields: Dict[str, float]) -> Optional[Point]:
     if not fields:

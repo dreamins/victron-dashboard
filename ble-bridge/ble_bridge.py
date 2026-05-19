@@ -32,7 +32,7 @@ from bridge_config import (
     load_device_map, persist_mac, persist_uuids,
     BMS_TYPES, DEFAULT_WRITE_S,
 )
-from writer import InfluxWriter, _make_point, _make_battery_point
+from writer import InfluxWriter, _make_point, _make_battery_point, _make_heartbeat_point
 
 logging.basicConfig(
     level=logging.INFO,
@@ -133,15 +133,30 @@ async def _read_one_bms_frame(address: str, write_uuid: str,
 
 # ── BridgeController ─────────────────────────────────────────────────────────
 
+async def run_heartbeat(site_ids: list, writer: InfluxWriter) -> None:
+    """Write a liveness heartbeat to InfluxDB every 30s.
+
+    As long as this task runs, the API can distinguish 'bridge alive but devices
+    asleep at night' from 'bridge process is dead'.
+    """
+    while True:
+        ts = datetime.now(timezone.utc)
+        for site_id in site_ids:
+            pt = _make_heartbeat_point(site_id, ts)
+            writer.write(pt)
+        await asyncio.sleep(30.0)
+
+
 class BridgeController:
     """Manages scanner and BMS poller tasks; supports reload and BMS scan."""
 
     def __init__(self, device_map: Dict[str, Any], writer: InfluxWriter):
         self.device_map: Dict[str, Any]    = device_map
         self.writer                        = writer
-        self._scanner_task: Optional[asyncio.Task] = None
-        self._bms_tasks:    Dict[str, asyncio.Task] = {}
-        self._watchdog_task: Optional[asyncio.Task] = None
+        self._scanner_task:   Optional[asyncio.Task] = None
+        self._bms_tasks:      Dict[str, asyncio.Task] = {}
+        self._watchdog_task:  Optional[asyncio.Task] = None
+        self._heartbeat_task: Optional[asyncio.Task] = None
 
     @staticmethod
     def _bms_key(info: Dict) -> str:
@@ -172,6 +187,8 @@ class BridgeController:
 
         self._scanner_task  = asyncio.create_task(run_ble_scanner(victron, self.writer))
         self._watchdog_task = asyncio.create_task(self._scanner_watchdog())
+        site_ids = list({info["site_id"] for info in self.device_map.values()})
+        self._heartbeat_task = asyncio.create_task(run_heartbeat(site_ids, self.writer))
         for info in bms_devs:
             key = self._bms_key(info)
             self._bms_tasks[key] = asyncio.create_task(run_bms_poller(info, self.writer))
@@ -493,7 +510,7 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter,
             if scan_was_running:
                 await asyncio.sleep(0.5)
 
-            await bms.connect()
+            await asyncio.wait_for(bms.connect(), timeout=30.0)
             connected_ok = True
             backoff_idx  = 0
 
@@ -524,7 +541,7 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter,
                 except Exception:
                     pass
             try:
-                await bms.disconnect()
+                await asyncio.wait_for(bms.disconnect(), timeout=10.0)
             except Exception:
                 pass
 
@@ -593,6 +610,8 @@ async def run_production(device_map: Dict[str, Any], writer: InfluxWriter) -> No
             controller._scanner_task.cancel()
         if controller._watchdog_task and not controller._watchdog_task.done():
             controller._watchdog_task.cancel()
+        if controller._heartbeat_task and not controller._heartbeat_task.done():
+            controller._heartbeat_task.cancel()
 
     loop.add_signal_handler(signal.SIGTERM, _shutdown)
     loop.add_signal_handler(signal.SIGINT,  _shutdown)
@@ -607,7 +626,8 @@ async def run_production(device_map: Dict[str, Any], writer: InfluxWriter) -> No
         pass
     finally:
         remaining = list(controller._bms_tasks.values())
-        for t in [controller._scanner_task, controller._watchdog_task]:
+        for t in [controller._scanner_task, controller._watchdog_task,
+                  controller._heartbeat_task]:
             if t:
                 remaining.append(t)
         for t in remaining:

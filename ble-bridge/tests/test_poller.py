@@ -273,6 +273,39 @@ def test_poller_writes_battery_point():
     assert len(writer.written) >= 1
 
 
+# ── Connect timeout ───────────────────────────────────────────────────────────
+
+def test_poller_connect_timeout_triggers_retry():
+    """asyncio.wait_for(bms.connect(), timeout=30) must not deadlock.
+
+    If bms.connect() raises TimeoutError the poller catches it as a generic
+    exception, applies backoff, and retries — exactly like any other failure.
+    """
+    _reset()
+    writer      = _MockWriter()
+    sleep_calls = []
+
+    class _TimeoutBMS(_MockBMS):
+        async def connect(self):
+            self.connect_calls += 1
+            raise asyncio.TimeoutError("injected connect timeout")
+
+    bms = _TimeoutBMS("AA:BB:CC:DD:EE:FF")
+
+    async def _fake_sleep(t):
+        sleep_calls.append(t)
+
+    async def _go():
+        with patch("asyncio.sleep", side_effect=_fake_sleep):
+            await run_bms_poller(BMS_INFO, writer,
+                                 bms_factory=lambda m: bms,
+                                 _max_cycles=2)
+
+    _run(_go())
+    assert bms.connect_calls == 2, "Poller should retry after TimeoutError"
+    assert 5 in sleep_calls, f"Expected 5s backoff after timeout, got: {sleep_calls}"
+
+
 # ── Disconnect exception regression ──────────────────────────────────────────
 
 def test_poller_survives_disconnect_exception():

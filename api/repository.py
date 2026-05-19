@@ -122,7 +122,26 @@ from(bucket: "{self._bucket}")
             })
 
         bridge_online = latest is not None and (now - latest).total_seconds() < BRIDGE_S
+        if not bridge_online and site:
+            bridge_online = self.get_bridge_alive(site)
         return {"bridge_online": bridge_online, "devices": sorted(result, key=lambda d: d["id"])}
+
+    def get_bridge_alive(self, site: str) -> bool:
+        """Return True if ble-bridge wrote a heartbeat in the last 2 minutes."""
+        q = f"""
+from(bucket: "{self._bucket}")
+  |> range(start: -2m)
+  |> filter(fn: (r) => r._measurement == "ble_bridge_alive" and r["site"] == "{site}")
+  |> limit(n: 1)
+"""
+        try:
+            tables = self.query_api.query(q)
+            for table in tables:
+                if table.records:
+                    return True
+        except Exception:
+            pass
+        return False
 
     # ── battery snapshot ─────────────────────────────────────────────────────
 
