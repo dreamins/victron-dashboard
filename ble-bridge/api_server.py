@@ -20,14 +20,27 @@ API_PORT = int(os.environ.get("API_PORT", "8088"))
 def make_app(controller) -> web.Application:
     app = web.Application()
     app["controller"] = controller
-    app.router.add_get("/health",   _health)
-    app.router.add_post("/scan-bms", _scan_bms)
-    app.router.add_post("/reload",   _reload)
+    app.router.add_get("/health",        _health)
+    app.router.add_get("/scan-victron",  _scan_victron)
+    app.router.add_post("/scan-bms",     _scan_bms)
+    app.router.add_post("/reload",       _reload)
     return app
 
 
 async def _health(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
+
+
+async def _scan_victron(request: web.Request) -> web.Response:
+    controller = request.app["controller"]
+    try:
+        results = await asyncio.wait_for(controller.scan_victron(), timeout=25.0)
+        return web.json_response(results)
+    except asyncio.TimeoutError:
+        return web.json_response({"error": "scan timed out"}, status=504)
+    except Exception as exc:
+        log.error("scan-victron error: %s", exc)
+        return web.json_response({"error": str(exc)}, status=500)
 
 
 async def _scan_bms(request: web.Request) -> web.Response:

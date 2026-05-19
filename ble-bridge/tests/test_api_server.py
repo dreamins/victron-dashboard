@@ -9,11 +9,13 @@ pytest_plugins = ("pytest_asyncio",)
 class _FakeController:
     """Minimal BridgeController stand-in for tests."""
 
-    def __init__(self, scan_result=None, reload_raises=None):
-        self._scan_result   = scan_result or []
-        self._reload_raises = reload_raises
-        self.reload_called  = False
-        self.scan_called    = False
+    def __init__(self, scan_result=None, victron_result=None, reload_raises=None):
+        self._scan_result    = scan_result or []
+        self._victron_result = victron_result or []
+        self._reload_raises  = reload_raises
+        self.reload_called   = False
+        self.scan_called     = False
+        self.victron_scan_called = False
 
     async def reload(self):
         self.reload_called = True
@@ -24,14 +26,22 @@ class _FakeController:
         self.scan_called = True
         return self._scan_result
 
+    async def scan_victron(self):
+        self.victron_scan_called = True
+        return self._victron_result
+
 
 @pytest.fixture
 def controller():
     return _FakeController(
         scan_result=[
-            {"mac": "AA:BB:CC:DD:EE:FF", "soc": 91.0, "voltage": 13.31, "temp": 22.0,
+            {"mac": "AA:BB:CC:DD:00:01", "soc": 91.0, "voltage": 13.31, "temp": 22.0,
              "write_uuid": "aaaa", "notify_uuid": "bbbb"},
-        ]
+        ],
+        victron_result=[
+            {"mac": "CC:08:F7:F7:00:01", "name": "BSC IP22 12/30", "rssi": -72},
+            {"mac": "F5:0D:91:F4:00:02", "name": "SmartSolar 150/75", "rssi": -59},
+        ],
     )
 
 
@@ -90,7 +100,7 @@ async def test_scan_bms_returns_results(app, controller):
         body = await resp.json()
         assert isinstance(body, list)
         assert len(body) == 1
-        assert body[0]["mac"] == "AA:BB:CC:DD:EE:FF"
+        assert body[0]["mac"] == "AA:BB:CC:DD:00:01"
         assert body[0]["soc"] == 91.0
         assert controller.scan_called
 
@@ -130,6 +140,50 @@ async def test_scan_bms_timeout():
         async with TestClient(TestServer(app)) as client:
             resp = await client.post("/scan-bms")
             assert resp.status == 504
+
+
+# ── /scan-victron ─────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_scan_victron_returns_results(app, controller):
+    from aiohttp.test_utils import TestClient, TestServer
+    async with TestClient(TestServer(app)) as client:
+        resp = await client.get("/scan-victron")
+        assert resp.status == 200
+        body = await resp.json()
+        assert isinstance(body, list)
+        assert len(body) == 2
+        assert body[0]["mac"] == "CC:08:F7:F7:00:01"
+        assert body[0]["rssi"] == -72
+        assert controller.victron_scan_called
+
+
+@pytest.mark.asyncio
+async def test_scan_victron_empty():
+    ctrl = _FakeController(victron_result=[])
+    from api_server import make_app
+    app = make_app(ctrl)
+    from aiohttp.test_utils import TestClient, TestServer
+    async with TestClient(TestServer(app)) as client:
+        resp = await client.get("/scan-victron")
+        assert resp.status == 200
+        assert await resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_scan_victron_error():
+    class _ErrorCtrl:
+        async def scan_victron(self):
+            raise RuntimeError("adapter failure")
+
+    from api_server import make_app
+    app = make_app(_ErrorCtrl())
+    from aiohttp.test_utils import TestClient, TestServer
+    async with TestClient(TestServer(app)) as client:
+        resp = await client.get("/scan-victron")
+        assert resp.status == 500
+        body = await resp.json()
+        assert "error" in body
 
 
 @pytest.mark.asyncio

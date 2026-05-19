@@ -153,6 +153,29 @@ async def scan_bms(site: str = Query(...)):
             raise HTTPException(502, f"Bridge unreachable: {exc}")
 
 
+@app.get("/api/v1/scan/victron")
+async def scan_victron(site: str = Query(...)):
+    all_sites = load_sites(SITES_FILE)
+    s = next((x for x in all_sites if x["id"] == site), None)
+    if s is None:
+        raise HTTPException(404, "site not found")
+    if s.get("bridge") not in ("ble", "linux_ble"):
+        raise HTTPException(400, "site does not use a BLE bridge — scan not available")
+    if not BLE_BRIDGE_URL:
+        raise HTTPException(503, "BLE_BRIDGE_URL not configured")
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        try:
+            resp = await client.get(f"{BLE_BRIDGE_URL}/scan-victron")
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.TimeoutException:
+            raise HTTPException(504, "Victron scan timed out")
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(502, f"Bridge error: {exc.response.text}")
+        except Exception as exc:
+            raise HTTPException(502, f"Bridge unreachable: {exc}")
+
+
 @app.post("/api/v1/sites/{site_id}/devices")
 async def add_device(site_id: str, device: DeviceCreate):
     if not ID_RE.match(site_id):

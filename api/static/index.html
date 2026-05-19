@@ -1478,14 +1478,18 @@ async function drawDailyBar(cid){
 // ── Settings panel ─────────────────────────────────────────────────────
 var _spScanState = null;  // null | 'scanning' | 'done' | 'error'
 var _spScanResults = [];
-var _spShowMpptForm = false;
 var _spBleOnly = false;
+var _spVictronScanState = null;  // null | 'scanning' | 'done' | 'error'
+var _spVictronResults = [];
+var _spSelectedVictron = null;   // {mac, name} once user picks one
+var _spShowMpptForm = false;     // true when entering manually (no scan)
 
 function openSettings(){
   if(!S.activeSite) return;
   const site=S.sites.find(s=>s.id===S.activeSite)||{};
   _spBleOnly = site.bridge==='ble' || site.bridge==='linux_ble';
-  _spScanState=null; _spScanResults=[]; _spShowMpptForm=false;
+  _spScanState=null; _spScanResults=[];
+  _spVictronScanState=null; _spVictronResults=[]; _spSelectedVictron=null; _spShowMpptForm=false;
   document.getElementById('settings-overlay').classList.remove('hidden');
   renderSettingsPanel();
 }
@@ -1569,20 +1573,56 @@ function renderSettingsPanel(){
     html+=`</div>`;
   }
 
-  // Add MPPT form
+  // Add MPPT section
   html+=`<div class="sp-section">
     <div class="sp-section-title">Add MPPT / Victron Device</div>`;
-  if(!_spShowMpptForm){
-    html+=`<button class="sp-add-btn" onclick="_spShowMpptForm=true;renderSettingsPanel()">
-      <div class="sp-add-icon" style="color:var(--solar);background:rgba(255,204,51,0.15)">&#9711;</div> Add MPPT / charge controller
+  if(!_spVictronScanState && !_spShowMpptForm){
+    // Initial state — offer scan or manual entry
+    html+=`<button class="sp-add-btn" onclick="startVictronScan()">
+      <div class="sp-add-icon" style="color:var(--solar);background:rgba(255,204,51,0.15)">&#9711;</div> Scan for Victron devices (~10 s)
+    </button>
+    <button class="sp-add-btn" style="margin-top:6px" onclick="_spShowMpptForm=true;renderSettingsPanel()">
+      <div class="sp-add-icon" style="color:var(--text-muted);background:var(--surf-2)">&#9998;</div> Enter MAC manually
     </button>`;
-  } else {
-    html+=`<div class="sp-form">
+  } else if(_spVictronScanState==='scanning'){
+    html+=`<div style="padding:16px 0;text-align:center;color:var(--text-muted)">Scanning&#8230;</div>`;
+  } else if(_spVictronScanState==='error'){
+    html+=`<div style="padding:8px 0;color:#f87171">Scan failed.</div>
+    <button class="sp-add-btn" onclick="startVictronScan()">
+      <div class="sp-add-icon" style="color:var(--solar);background:rgba(255,204,51,0.15)">&#9711;</div> Retry scan
+    </button>`;
+  } else if(_spVictronScanState==='done' && !_spSelectedVictron){
+    // Show found devices
+    if(_spVictronResults.length===0){
+      html+=`<div style="padding:8px 0;color:var(--text-muted);font-size:13px">No unconfigured Victron devices found.</div>`;
+    } else {
+      _spVictronResults.forEach((d,i)=>{
+        html+=`<button class="sp-add-btn" onclick="selectVictronDevice(${i})" style="margin-top:4px">
+          <div class="sp-add-icon" style="color:var(--solar);background:rgba(255,204,51,0.15)">&#9711;</div>
+          <div style="text-align:left">
+            <div style="font-weight:600">${d.name}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${d.mac} &nbsp;·&nbsp; ${d.rssi} dBm</div>
+          </div>
+        </button>`;
+      });
+    }
+    html+=`<button class="sp-add-btn" onclick="startVictronScan()" style="margin-top:8px">
+      <div class="sp-add-icon" style="color:var(--text-muted);background:var(--surf-2)">&#8635;</div> Scan again
+    </button>`;
+  }
+  // Form: shown when device selected from scan OR manual entry
+  if(_spSelectedVictron || _spShowMpptForm){
+    const preMac = _spSelectedVictron ? _spSelectedVictron.mac : '';
+    const preName = _spSelectedVictron ? _spSelectedVictron.name : '';
+    html+=`<div class="sp-form" style="margin-top:8px">
       <div class="sp-field"><label>Device ID</label><input id="sp-mppt-id" placeholder="e.g. mppt3" /></div>
-      <div class="sp-field"><label>Label</label><input id="sp-mppt-label" placeholder="e.g. MPPT 3" /></div>
-      <div class="sp-field"><label>MAC address</label><input id="sp-mppt-mac" placeholder="AA:BB:CC:DD:EE:FF" /></div>
-      <div class="sp-field"><label>BLE encryption key (32 hex chars)</label><input id="sp-mppt-key" placeholder="From VictronConnect → Product Info" /></div>
-      <button class="sp-submit" onclick="submitAddMppt()">Save device</button>
+      <div class="sp-field"><label>Label</label><input id="sp-mppt-label" value="${preName}" placeholder="e.g. MPPT 3" /></div>
+      <div class="sp-field"><label>MAC address</label><input id="sp-mppt-mac" value="${preMac}" placeholder="XX:XX:XX:XX:XX:XX" ${preMac?'readonly style="opacity:0.6"':''}/></div>
+      <div class="sp-field"><label>BLE encryption key (32 hex chars)</label><input id="sp-mppt-key" placeholder="VictronConnect → Product Info → eye icon" /></div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="sp-submit" onclick="submitAddMppt()">Save device</button>
+        <button class="sp-submit" style="background:var(--surf-2);color:var(--text)" onclick="_spSelectedVictron=null;_spShowMpptForm=false;renderSettingsPanel()">Cancel</button>
+      </div>
     </div>`;
   }
   html+=`</div>`;
@@ -1603,6 +1643,27 @@ async function startBmsScan(){
     console.error('BMS scan failed:',e);
     _spScanState='error';
   }
+  renderSettingsPanel();
+}
+
+async function startVictronScan(){
+  _spVictronScanState='scanning'; _spVictronResults=[]; _spSelectedVictron=null; _spShowMpptForm=false;
+  renderSettingsPanel();
+  try{
+    const sq=`?site=${encodeURIComponent(S.activeSite)}`;
+    const res=await fetch(`/api/v1/scan/victron${sq}`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    _spVictronResults=await res.json();
+    _spVictronScanState='done';
+  }catch(e){
+    console.error('Victron scan failed:',e);
+    _spVictronScanState='error';
+  }
+  renderSettingsPanel();
+}
+
+function selectVictronDevice(idx){
+  _spSelectedVictron=_spVictronResults[idx]||null;
   renderSettingsPanel();
 }
 
@@ -1632,10 +1693,10 @@ async function addBmsFromScan(idx){
 async function submitAddMppt(){
   const id   =document.getElementById('sp-mppt-id')?.value.trim();
   const label=document.getElementById('sp-mppt-label')?.value.trim();
-  const mac  =document.getElementById('sp-mppt-mac')?.value.trim().toUpperCase();
+  const mac  =(_spSelectedVictron?.mac || document.getElementById('sp-mppt-mac')?.value.trim()).toUpperCase();
   const key  =document.getElementById('sp-mppt-key')?.value.trim();
   if(!id||!label||!mac||!key){ alert('All fields are required.'); return; }
-  if(!/^[A-F0-9:]{17}$/.test(mac)){ alert('MAC address must be in format AA:BB:CC:DD:EE:FF'); return; }
+  if(!/^[A-F0-9:]{17}$/.test(mac)){ alert('MAC address must be in format XX:XX:XX:XX:XX:XX'); return; }
   if(!/^[0-9a-fA-F]{32}$/.test(key)){ alert('BLE key must be 32 hex characters'); return; }
   try{
     const resp=await fetch(`/api/v1/sites/${encodeURIComponent(S.activeSite)}/devices`,{
@@ -1647,7 +1708,7 @@ async function submitAddMppt(){
       alert('Error: '+(err.detail||resp.statusText));
       return;
     }
-    _spShowMpptForm=false;
+    _spVictronScanState=null; _spVictronResults=[]; _spSelectedVictron=null; _spShowMpptForm=false;
     renderSettingsPanel();
     poll();
   }catch(e){ alert('Network error: '+e); }

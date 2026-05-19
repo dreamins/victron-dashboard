@@ -309,6 +309,44 @@ class BridgeController:
 
         return results
 
+    async def scan_victron(self) -> list:
+        """Passive BLE scan for nearby Victron devices not already in config.
+
+        Stops the running scanner briefly, runs BleakScanner.discover for 10s,
+        filters by Victron manufacturer ID, excludes already-configured MACs,
+        returns [{mac, name, rssi}] sorted by signal strength.
+        """
+        from bleak import BleakScanner
+
+        was_running = await _scanner_stop()
+        if was_running:
+            await asyncio.sleep(0.5)
+
+        try:
+            adapter_kw = {"bluez": {"adapter": BLE_ADAPTER}} if BLE_ADAPTER else {}
+            devices = await BleakScanner.discover(timeout=10.0, **adapter_kw)
+        finally:
+            if was_running:
+                try:
+                    await _scanner_start()
+                except Exception:
+                    pass
+
+        configured = {v["mac"].upper() for v in self.device_map.values()
+                      if "mac" in v}
+        results = []
+        for d in devices:
+            mfr = d.metadata.get("manufacturer_data") or {}
+            if VICTRON_MFR_ID not in mfr:
+                continue
+            mac = d.address.upper()
+            if mac in configured:
+                continue
+            results.append({"mac": mac, "name": d.name or mac, "rssi": d.rssi})
+
+        log.info("scan-victron: %d unconfigured Victron device(s) found", len(results))
+        return sorted(results, key=lambda x: -(x["rssi"] or -999))
+
 
 # ── Scanner ───────────────────────────────────────────────────────────────────
 
