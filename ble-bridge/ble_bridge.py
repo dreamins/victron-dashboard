@@ -144,25 +144,35 @@ async def _wait_for_bms_in_scan(mac: str, timeout: float = 300.0) -> bool:
         _bms_seen_events.pop(mac, None)
 
 
-async def _force_stop_discovery() -> None:
-    """Call org.bluez.Adapter1.StopDiscovery() to clear any leftover BlueZ scan session.
+async def _force_stop_discovery(power_cycle: bool = False) -> None:
+    """Clear any leftover BlueZ scan session so scanner.start() can succeed.
 
-    When the container restarts, BlueZ may still have an active discovery from the
-    previous process.  Calling StopDiscovery() clears it so scanner.start() succeeds.
+    First tries StopDiscovery() — works when the session is owned by *this*
+    D-Bus connection (e.g. after a clean scanner stop).  When the session is
+    owned by a now-dead process (container restart, killed subprocess), BlueZ
+    only lets the owner stop it; in that case we fall back to power-cycling the
+    adapter (Powered=false then true), which evicts ALL sessions.
     """
     adapter = BLE_ADAPTER or "hci0"
     try:
         from dbus_fast.aio import MessageBus
-        from dbus_fast import BusType
+        from dbus_fast import BusType, Variant
         bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
         try:
             introspection = await bus.introspect("org.bluez", f"/org/bluez/{adapter}")
             proxy = bus.get_proxy_object("org.bluez", f"/org/bluez/{adapter}", introspection)
-            iface = proxy.get_interface("org.bluez.Adapter1")
-            await iface.call_stop_discovery()
-            log.info("StopDiscovery sent to %s — cleared InProgress", adapter)
+            if power_cycle:
+                props = proxy.get_interface("org.freedesktop.DBus.Properties")
+                await props.call_set("org.bluez.Adapter1", "Powered", Variant("b", False))
+                await asyncio.sleep(1.0)
+                await props.call_set("org.bluez.Adapter1", "Powered", Variant("b", True))
+                log.info("Adapter %s power-cycled — all BlueZ sessions cleared", adapter)
+            else:
+                iface = proxy.get_interface("org.bluez.Adapter1")
+                await iface.call_stop_discovery()
+                log.info("StopDiscovery sent to %s — cleared InProgress", adapter)
         except Exception as exc:
-            log.debug("StopDiscovery: %s (ok if no session was active)", exc)
+            log.debug("_force_stop_discovery(%s): %s", adapter, exc)
         finally:
             bus.disconnect()
     except Exception as exc:
@@ -181,13 +191,54 @@ async def _scanner_stop() -> bool:
         return False
 
 
+async def _is_discovering() -> bool:
+    """Return True if the BlueZ adapter has Discovering=true.
+
+    Used by the scanner watchdog to detect the 'task alive but scan dead'
+    failure mode where scanner.start() succeeded but BlueZ silently stopped
+    the scan (e.g. after a timed-out BMS connect).
+    """
+    adapter = BLE_ADAPTER or "hci0"
+    try:
+        from dbus_fast.aio import MessageBus
+        from dbus_fast import BusType
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        try:
+            introspection = await bus.introspect("org.bluez", f"/org/bluez/{adapter}")
+            proxy = bus.get_proxy_object("org.bluez", f"/org/bluez/{adapter}", introspection)
+            iface = proxy.get_interface("org.freedesktop.DBus.Properties")
+            result = await iface.call_get("org.bluez.Adapter1", "Discovering")
+            return bool(result.value)
+        finally:
+            bus.disconnect()
+    except Exception as exc:
+        log.debug("_is_discovering: %s", exc)
+        return True  # assume OK if we can't check
+
+
 async def _scanner_start() -> None:
+    """Start (or restart) the Victron scanner.
+
+    No asyncio.wait_for timeout here — bleak's start() blocks until the scan
+    is live and timing it out would cancel the D-Bus call mid-flight, leaving
+    BlueZ in InProgress state.  The OS-thread watchdog is the safety net if
+    the event loop truly freezes.
+    """
     if _victron_scanner is None:
         return
-    try:
-        await asyncio.wait_for(_victron_scanner.start(), timeout=10.0)
-    except Exception:
-        pass
+    for _attempt in range(4):
+        try:
+            await _victron_scanner.start()
+            return
+        except Exception as exc:
+            if "InProgress" in str(exc) and _attempt < 3:
+                log.warning("_scanner_start InProgress — clearing (attempt %d)", _attempt + 1)
+                # First two retries: gentle StopDiscovery.
+                # Third retry: power-cycle the adapter to evict foreign sessions.
+                await _force_stop_discovery(power_cycle=(_attempt == 2))
+            else:
+                log.warning("_scanner_start failed: %s", exc)
+                return
 
 
 async def _read_one_bms_frame(address: str, write_uuid: str,
@@ -283,23 +334,38 @@ class BridgeController:
                  len(victron), len(bms_devs))
 
     async def _scanner_watchdog(self) -> None:
-        """Restart the scanner task if it exits unexpectedly (e.g. BlueZ crash).
+        """Restart the scanner task if it exits OR if BlueZ stops discovering.
 
-        Without this, BMS pollers fall into a tight loop (_victron_scanner is
-        None → _wait_for_bms_in_scan returns False immediately → loop) and the
-        BMS goes offline indefinitely.
+        Two failure modes handled:
+        1. Task exits (exc is not None) — bleak raised an exception.
+        2. Task alive but Discovering=false — scanner.start() succeeded but
+           BlueZ silently dropped the scan (e.g. timed-out BMS connect called
+           _scanner_stop/_scanner_start and the start timed out mid-D-Bus).
         """
+        _check_count = 0
         while True:
             await asyncio.sleep(30.0)
+            _check_count += 1
             t = self._scanner_task
-            if t is not None and t.done():
-                exc = t.exception() if not t.cancelled() else None
+            if t is None or t.done():
+                exc = (t.exception() if (t is not None and not t.cancelled()) else None)
                 log.error("Scanner task exited (exc=%s) — restarting in 10s", exc)
                 await asyncio.sleep(10.0)
                 victron = self._victron_subset(self.device_map)
                 self._scanner_task = asyncio.create_task(
                     run_ble_scanner(victron, self.writer))
                 log.info("Scanner task restarted by watchdog")
+                _check_count = 0
+            elif _check_count >= 4:  # every 2 minutes
+                _check_count = 0
+                if not await _is_discovering():
+                    log.warning("BlueZ Discovering=false while scanner task is alive — restarting")
+                    t.cancel()
+                    try:
+                        await asyncio.wait_for(t, timeout=5.0)
+                    except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                        pass
+                    # watchdog will restart it on the next iteration
 
     async def reload(self) -> None:
         """Re-read sites.json and diff-apply changes without restarting."""
@@ -511,7 +577,9 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter,
         except Exception as exc:
             if "InProgress" in str(exc) and _attempt < 5:
                 log.warning("Scanner start busy (InProgress) — retry %d", _attempt + 1)
-                await _force_stop_discovery()
+                # Attempts 0-3: gentle StopDiscovery.
+                # Attempt 4: power-cycle to evict foreign sessions.
+                await _force_stop_discovery(power_cycle=(_attempt >= 4))
             else:
                 raise
     try:

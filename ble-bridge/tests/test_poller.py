@@ -478,3 +478,82 @@ def test_watchdog_resets_adapter_when_poller_frozen(monkeypatch):
         f"Expected hciconfig reset call, got: {reset_calls}"
     )
     assert len(reset_calls) == 1, f"Expected exactly one reset, got: {reset_calls}"
+
+
+# ── _scanner_start() InProgress retry ────────────────────────────────────────
+
+def test_scanner_start_power_cycles_on_third_attempt():
+    """_scanner_start() must call _force_stop_discovery(power_cycle=True) on
+    the third InProgress attempt (index 2), not on the first two."""
+    _reset()
+    power_cycle_calls = []
+    inprogress = Exception("[org.bluez.Error.InProgress] Operation already in progress")
+
+    class _MockScanner:
+        def __init__(self):
+            self.start_calls = 0
+
+        async def start(self):
+            self.start_calls += 1
+            raise inprogress
+
+    scanner = _MockScanner()
+    ble_bridge._victron_scanner = scanner
+
+    async def _fake_force_stop(power_cycle=False):
+        power_cycle_calls.append(power_cycle)
+        await asyncio.sleep(0)
+
+    async def _go():
+        with patch("ble_bridge._force_stop_discovery", side_effect=_fake_force_stop):
+            await ble_bridge._scanner_start()
+
+    _run(_go())
+    ble_bridge._victron_scanner = None
+
+    assert scanner.start_calls == 4, f"Expected 4 start attempts, got {scanner.start_calls}"
+    assert power_cycle_calls == [False, False, True], (
+        f"Expected [False, False, True] for power_cycle calls, got {power_cycle_calls}"
+    )
+
+
+def test_scanner_watchdog_restarts_when_not_discovering():
+    """BridgeController._scanner_watchdog cancels the scanner task when
+    _is_discovering() returns False, allowing the watchdog to restart it."""
+    from ble_bridge import BridgeController
+
+    async def _go():
+        ctrl = BridgeController({}, MagicMock())
+        ctrl._scanner_task = asyncio.create_task(asyncio.sleep(9999))
+
+        sleep_count = [0]
+        cancelled   = []
+
+        async def _fake_is_discovering():
+            return False
+
+        async def _fake_sleep(t):
+            sleep_count[0] += 1
+            if sleep_count[0] >= 5:
+                raise RuntimeError("watchdog-test-stop")
+
+        original_cancel = ctrl._scanner_task.cancel
+
+        def _tracking_cancel(*args, **kwargs):
+            cancelled.append(True)
+            return original_cancel(*args, **kwargs)
+
+        ctrl._scanner_task.cancel = _tracking_cancel
+
+        with patch("ble_bridge._is_discovering", side_effect=_fake_is_discovering), \
+             patch("asyncio.sleep", side_effect=_fake_sleep):
+            try:
+                await ctrl._scanner_watchdog()
+            except RuntimeError as e:
+                if "watchdog-test-stop" not in str(e):
+                    raise
+
+        return cancelled
+
+    cancelled = _run(_go())
+    assert cancelled, "Watchdog should have cancelled the scanner task when Discovering=false"
