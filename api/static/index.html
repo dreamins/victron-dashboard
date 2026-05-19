@@ -1615,10 +1615,28 @@ function renderSettingsPanel(){
     const preMac = _spSelectedVictron ? _spSelectedVictron.mac : '';
     const preName = _spSelectedVictron ? _spSelectedVictron.name : '';
     html+=`<div class="sp-form" style="margin-top:8px">
-      <div class="sp-field"><label>Device ID</label><input id="sp-mppt-id" placeholder="e.g. mppt3" /></div>
-      <div class="sp-field"><label>Label</label><input id="sp-mppt-label" value="${preName}" placeholder="e.g. MPPT 3" /></div>
-      <div class="sp-field"><label>MAC address</label><input id="sp-mppt-mac" value="${preMac}" placeholder="XX:XX:XX:XX:XX:XX" ${preMac?'readonly style="opacity:0.6"':''}/></div>
-      <div class="sp-field"><label>BLE encryption key (32 hex chars)</label><input id="sp-mppt-key" placeholder="VictronConnect → Product Info → eye icon" /></div>
+      <div class="sp-field">
+        <label>Device ID <span style="font-weight:400;color:var(--text-muted);font-size:11px">(letters, numbers, _ -)</span></label>
+        <input id="sp-mppt-id" placeholder="e.g. ip22_charger"
+          oninput="document.getElementById('sp-mppt-id-err').textContent=/^[a-zA-Z0-9_-]{1,64}$/.test(this.value.trim())||!this.value?'':'Invalid — use only letters, numbers, _ or -'" />
+        <span id="sp-mppt-id-err" style="color:#f87171;font-size:11px;margin-top:2px;display:block"></span>
+      </div>
+      <div class="sp-field">
+        <label>Label</label>
+        <input id="sp-mppt-label" value="${preName}" placeholder="e.g. IP22 Charger" />
+      </div>
+      <div class="sp-field">
+        <label>MAC address</label>
+        <input id="sp-mppt-mac" value="${preMac}" placeholder="XX:XX:XX:XX:XX:XX" ${preMac?'readonly style="opacity:0.6"':''}
+          oninput="document.getElementById('sp-mppt-mac-err').textContent=/^[A-Fa-f0-9:]{17}$/.test(this.value.trim())||!this.value?'':'Format must be XX:XX:XX:XX:XX:XX'" />
+        <span id="sp-mppt-mac-err" style="color:#f87171;font-size:11px;margin-top:2px;display:block"></span>
+      </div>
+      <div class="sp-field">
+        <label>BLE encryption key <span style="font-weight:400;color:var(--text-muted);font-size:11px">(32 hex chars)</span></label>
+        <input id="sp-mppt-key" placeholder="VictronConnect → Product Info → eye icon"
+          oninput="document.getElementById('sp-mppt-key-err').textContent=/^[0-9a-fA-F]{32}$/.test(this.value.trim())||!this.value?'':'Must be exactly 32 hex characters'" />
+        <span id="sp-mppt-key-err" style="color:#f87171;font-size:11px;margin-top:2px;display:block"></span>
+      </div>
       <div style="display:flex;gap:8px;margin-top:4px">
         <button class="sp-submit" onclick="submitAddMppt()">Save device</button>
         <button class="sp-submit" style="background:var(--surf-2);color:var(--text)" onclick="_spSelectedVictron=null;_spShowMpptForm=false;renderSettingsPanel()">Cancel</button>
