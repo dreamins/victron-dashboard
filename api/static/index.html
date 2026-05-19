@@ -524,7 +524,7 @@ var S={
   current:{}, devices:[], bridge_online:true,
   mptts:[], bsense:null,
   bvolt:null, bsoc:null,
-  tab:3, range:'24h', last:null, chartsLoaded:false, tabDefs:[],
+  tab:-1, range:'24h', last:null, chartsLoaded:false, tabDefs:[],
   activeSite:null, sites:[], siteUi:{}, battData:{}, bmsDevice:null,
   tempProviders:[],
 };
@@ -870,7 +870,7 @@ function buildTabDefs(){
   S.tabDefs=defs;
 
   const INSIGHTS_IDX=defs.findIndex(d=>d.kind==='insights');
-  if(S.tab===3&&INSIGHTS_IDX>=0) S.tab=INSIGHTS_IDX;
+  if(S.tab<0) S.tab=INSIGHTS_IDX;
 
   const bar=document.getElementById('tab-bar');
   const tabHtml=defs.map((d,i)=>
@@ -906,6 +906,7 @@ function buildTabDefs(){
       return `
         <div id="panel-${i}" class="chart-panel ${active}">
           <div class="chart-card"><div class="chart-title">Total Solar Output</div><div class="chart-container"><canvas id="chart-${i}-comb"></canvas></div></div>
+          ${S.chargers.length>0?`<div class="chart-card"><div class="chart-title">AC Charger Current</div><div class="chart-container"><canvas id="chart-${i}-chg"></canvas></div></div>`:''}
           <div class="chart-card"><div class="chart-title">Daily Yield (Wh)</div><div class="chart-container"><canvas id="chart-${i}-bar"></canvas></div></div>
         </div>`;
     }).join('');
@@ -1131,7 +1132,10 @@ function _updateFlowValues(){
     if(sBg) sBg.setAttribute('fill',st[1]+(isLight()?'66':'33'));
     if(cBox) cBox.style.stroke=cs>0?st[1]+'dd':'';
     setText(`charger-flow-val-${m}`,fv(cDev,'charge_current','A'));
-    updatePath(`path-charger-${m}`,cc,'#60a5fa',10);
+    const bmsCurr=S.bmsDevice?Math.abs(S.battData[S.bmsDevice]?.fields?.battery_current??0):0;
+    const confirmed=cc>0.1&&bmsCurr>0.1&&Math.abs(cc-bmsCurr)<2;
+    const pathCol=confirmed?'#10b981':(cc>0.1?'#f59e0b':'#60a5fa');
+    updatePath(`path-charger-${m}`,cc,pathCol,10);
   }
 }
 
@@ -1291,7 +1295,7 @@ function renderCards(){
     if(isCharger){
       const cs=Math.round(d?.fields?.charge_state??-1);
       const stLbl=cs<0?'-':(STATES[cs]||STATES[0])[0];
-      const stCol=cs===3||cs===4?'#f59e0b':cs===5?'#10b981':'#6b7280';
+      const stCol=(STATES[cs]||STATES[0])[1];
       const err=Math.round(d?.fields?.charger_error??0);
       const bv=d?.fields?.battery_voltage!=null?d.fields.battery_voltage.toFixed(2)+' V':'-';
       const cc=d?.fields?.charge_current!=null?d.fields.charge_current.toFixed(2)+' A':'-';
@@ -1412,14 +1416,21 @@ async function updateCharts(){
     // Temperature: use declared providers; fall back to bsense for old sites without temp_providers.
     const tempIds=S.tempProviders.length>0?S.tempProviders.map(d=>d.id):(S.bsense?[S.bsense]:[]);
     if(tempIds.length>0) await drawMulti(`chart-${S.tab}-t`,tempIds,'temperature',rng.st,'°C');
-    await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,' A','Total Charging Current','#10b981');
-    await drawBatteryPower(`chart-${S.tab}-p`,S.mptts,rng.st,wTick,'Total Charging Power','#f59e0b');
+    if(S.bmsDevice){
+      await drawLine(`chart-${S.tab}-c`,S.bmsDevice,'battery_current',rng.st,'#10b981',' A',v=>-v);
+      await drawBmsPower(`chart-${S.tab}-p`,S.bmsDevice,rng.st,wTick,'Total Charging Power','#f59e0b');
+    } else {
+      await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,' A','Total Charging Current','#10b981');
+      await drawBatteryPower(`chart-${S.tab}-p`,S.mptts,rng.st,wTick,'Total Charging Power','#f59e0b');
+    }
   } else if(def.kind==='charger'){
     const id=def.id;
     await drawLine(`chart-${S.tab}-c`, id,'charge_current', rng.st,'#10b981',' A');
     await drawLine(`chart-${S.tab}-v`, id,'battery_voltage',rng.st,'#00f2ff',' V');
   } else {
     await drawSum(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,wTick,'Total Solar Output','#f59e0b');
+    if(S.chargers.length>0)
+      await drawSum(`chart-${S.tab}-chg`,S.chargers,'charge_current',rng.st,' A','AC Charger Current','#60a5fa');
     await drawDailyBar(`chart-${S.tab}-bar`);
   }
 }
@@ -1456,16 +1467,36 @@ function baseOpts(unit){
   };
 }
 
-async function drawLine(cid,dev,field,start,col,unit){
+async function drawLine(cid,dev,field,start,col,unit,transform=null){
   const res=await hFetch(dev,field,start);
   const canvas=document.getElementById(cid); if(!canvas) return;
   if(CH[cid]) CH[cid].destroy();
   const ctx=canvas.getContext('2d');
   CH[cid]=new Chart(canvas,{
     type:'line',
-    data:{datasets:[{data:(res.points||[]).map(p=>({x:p.t,y:p.v})),
+    data:{datasets:[{data:(res.points||[]).map(p=>({x:p.t,y:transform?transform(p.v):p.v})),
       borderColor:col, backgroundColor:grad(ctx,col), fill:true,
       borderWidth:2, pointRadius:0, tension:0.3}]},
+    options:baseOpts(unit)
+  });
+}
+
+async function drawBmsPower(cid,bmsId,start,unit,label,col){
+  const canvas=document.getElementById(cid); if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+  const[currRes,voltRes]=await Promise.all([
+    hFetch(bmsId,'battery_current',start),
+    hFetch(bmsId,'battery_voltage',start),
+  ]);
+  const vMap={};
+  (voltRes.points||[]).forEach(p=>{ vMap[p.t]=p.v; });
+  const data=(currRes.points||[])
+    .map(p=>({x:p.t,y:vMap[p.t]?Math.round(-p.v*vMap[p.t]):null}))
+    .filter(p=>p.y!=null&&p.y>0);
+  if(CH[cid]) CH[cid].destroy();
+  CH[cid]=new Chart(canvas,{
+    type:'line',
+    data:{datasets:[{label,data,borderColor:col,backgroundColor:grad(ctx,col),fill:true,borderWidth:2,pointRadius:0,tension:0.3}]},
     options:baseOpts(unit)
   });
 }
