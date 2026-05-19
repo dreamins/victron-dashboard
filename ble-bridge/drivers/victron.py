@@ -10,7 +10,9 @@ FIELD_GETTERS = [
     ("load_power",      "get_external_device_load"),
     ("charge_state",    "get_charge_state"),
     ("charger_error",   "get_charger_error"),
-    ("battery_voltage", "get_voltage"),      # BatterySense fallback
+    ("battery_voltage", "get_voltage"),         # BatterySense fallback
+    ("battery_voltage", "get_output_voltage1"), # AcCharger fallback
+    ("charge_current",  "get_output_current1"), # AcCharger fallback
     ("temperature",     "get_temperature"),
     ("pv_voltage",      "get_pv_voltage"),
     ("yield_total",     "get_yield_total"),

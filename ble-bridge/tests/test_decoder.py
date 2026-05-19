@@ -29,6 +29,14 @@ class TestFieldGetterList:
         methods = [m for f, m in FIELD_GETTERS if f == "battery_voltage"]
         assert "get_voltage" in methods
 
+    def test_battery_voltage_fallback_for_ac_charger(self):
+        methods = [m for f, m in FIELD_GETTERS if f == "battery_voltage"]
+        assert "get_output_voltage1" in methods
+
+    def test_charge_current_fallback_for_ac_charger(self):
+        methods = [m for f, m in FIELD_GETTERS if f == "charge_current"]
+        assert "get_output_current1" in methods
+
     def test_temperature_getter(self):
         assert ("temperature", "get_temperature") in FIELD_GETTERS
 
