@@ -798,7 +798,7 @@ function selectSite(id){
   S.siteUi=site.ui||{};
   localStorage.setItem('victron_selected_site',id);
 
-  S.current={}; S.devices=[]; S.mptts=[]; S.bsense=null;
+  S.current={}; S.devices=[]; S.mptts=[]; S.chargers=[]; S.bsense=null;
   S.bvolt=null; S.bsoc=null; S.battData={}; S.bmsDevice=null;
   S.chartsLoaded=false; S.last=null; _cardsKey=''; _dailyCache={};
   S.tempProviders=site.temp_providers||[];
@@ -903,8 +903,17 @@ async function poll(){
         !bmsIds.has(d.id)&&(d.id.includes('sense')||d.label.toLowerCase().includes('sense'))
       );
       S.bsense=bsDevice?bsDevice.id:null;
+
+      // AC chargers: have charge_state but no pv_power — not solar MPPTs
+      const chargerIds=new Set();
+      for(const d of S.devices){
+        const f=S.current[d.id]?.fields||{};
+        if('charge_state' in f && !('pv_power' in f) && !bmsIds.has(d.id)) chargerIds.add(d.id);
+      }
+      S.chargers=[...chargerIds].sort();
+
       S.mptts=S.devices
-        .filter(d=>d.id!==S.bsense&&!bmsIds.has(d.id))
+        .filter(d=>d.id!==S.bsense&&!bmsIds.has(d.id)&&!chargerIds.has(d.id))
         .map(d=>d.id).sort();
     }
 
@@ -928,12 +937,17 @@ function buildTabDefs(){
       !('charge_state' in (S.current[d.id].fields||{}))
     );
     if(bsenseDevice) bsense=bsenseDevice.id;
-    mptts=S.devices.filter(d=>d.id!==(bsenseDevice?.id)&&!bmsIds.has(d.id)).map(d=>d.id);
+    mptts=S.devices.filter(d=>d.id!==(bsenseDevice?.id)&&!bmsIds.has(d.id)&&!S.chargers.includes(d.id)).map(d=>d.id);
   }
 
   mptts.forEach((id,i)=>{
     const label=S.current[id]?.label||S.devices.find(d=>d.id===id)?.label||id;
     defs.push({id,label,kind:'mppt',idx:i});
+  });
+
+  S.chargers.forEach(id=>{
+    const label=S.current[id]?.label||S.devices.find(d=>d.id===id)?.label||id;
+    defs.push({id,label,kind:'charger',idx:defs.length});
   });
 
   const battId=S.siteUi?.battery_display==='bms'
@@ -971,6 +985,11 @@ function buildTabDefs(){
           <div class="chart-card"><div class="chart-title">Temperature</div><div class="chart-container"><canvas id="chart-${i}-t"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Total Charging Current</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Total Charging Power</div><div class="chart-container"><canvas id="chart-${i}-p"></canvas></div></div>
+        </div>`;
+      if(d.kind==='charger') return `
+        <div id="panel-${i}" class="chart-panel ${active}">
+          <div class="chart-card"><div class="chart-title">Charge Current</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
+          <div class="chart-card"><div class="chart-title">Battery Voltage</div><div class="chart-container"><canvas id="chart-${i}-v"></canvas></div></div>
         </div>`;
       return `
         <div id="panel-${i}" class="chart-panel ${active}">
@@ -1169,7 +1188,7 @@ function renderCards(){
   const cont=document.getElementById('cards');
   const isBmsSite=S.siteUi?.battery_display==='bms';
   const battId=isBmsSite?S.bmsDevice:S.bsense;
-  const ids=[...S.mptts,...(battId?[battId]:[])];
+  const ids=[...S.mptts,...(battId?[battId]:[]),...S.chargers];
 
   const battKey=S.bmsDevice?JSON.stringify(S.battData[S.bmsDevice]?.fields||{}):'';
   const key=ids.map(id=>{
@@ -1184,9 +1203,12 @@ function renderCards(){
     const info=S.devices.find(x=>x.id===id);
     const isM=S.mptts.includes(id);
     const isBms=isBmsSite&&id===S.bmsDevice;
-    const tabIdx=isM?S.mptts.indexOf(id):S.tabDefs.findIndex(t=>t.kind==='battery');
+    const isCharger=S.chargers.includes(id);
+    const tabIdx=isM?S.mptts.indexOf(id)
+                :isCharger?S.tabDefs.findIndex(t=>t.kind==='charger'&&t.id===id)
+                :S.tabDefs.findIndex(t=>t.kind==='battery');
     const isActive=S.tab===tabIdx;
-    const accent=isM?'#ffcc33':'var(--batt)';
+    const accent=isM?'#ffcc33':isCharger?'#60a5fa':'var(--batt)';
 
     if(isM){
       const pvW=pvWatts(d);
@@ -1209,6 +1231,26 @@ function renderCards(){
           <div><div class="m-v">${cc}</div><div class="m-l">Charge A</div></div>
           <div><div class="m-v">${pvv}</div><div class="m-l">PV Volt</div></div>
           <div><div class="m-v">${yt}</div><div class="m-l">Today</div></div>
+        </div>
+      </div>`;
+    }
+
+    if(isCharger){
+      const cs=Math.round(d?.fields?.charge_state??-1);
+      const stLbl=cs<0?'-':(STATES[cs]||STATES[0])[0];
+      const stCol=cs===3||cs===4?'#f59e0b':cs===5?'#10b981':'#6b7280';
+      const err=Math.round(d?.fields?.charger_error??0);
+      const bv=d?.fields?.battery_voltage!=null?d.fields.battery_voltage.toFixed(2)+' V':'-';
+      const cc=d?.fields?.charge_current!=null?d.fields.charge_current.toFixed(2)+' A':'-';
+      return `<div class="card${!info?.online?' s-silent':''}${isActive?' active-tab':''}"
+                   onclick="switchTab(${tabIdx})" style="padding-top:22px">
+        <div class="card-accent" style="background:#60a5fa"></div>
+        <div class="c-label">${d?.label||id}</div>
+        <div class="c-val-group"><span class="c-hero-num" style="color:${stCol}">${stLbl}</span></div>
+        <div class="c-hero-label">AC Charger · ${err?'Error '+err:'No errors'}</div>
+        <div class="c-grid" style="grid-template-columns:repeat(2,1fr)">
+          <div><div class="m-v">${bv}</div><div class="m-l">Battery V</div></div>
+          <div><div class="m-v">${cc}</div><div class="m-l">Charge A</div></div>
         </div>
       </div>`;
     }
@@ -1312,6 +1354,10 @@ async function updateCharts(){
     if(tempIds.length>0) await drawMulti(`chart-${S.tab}-t`,tempIds,'temperature',rng.st,'°C');
     await drawSum(`chart-${S.tab}-c`,S.mptts,'charge_current',rng.st,' A','Total Charging Current','#10b981');
     await drawBatteryPower(`chart-${S.tab}-p`,S.mptts,rng.st,wTick,'Total Charging Power','#f59e0b');
+  } else if(def.kind==='charger'){
+    const id=def.id;
+    await drawLine(`chart-${S.tab}-c`, id,'charge_current', rng.st,'#10b981',' A');
+    await drawLine(`chart-${S.tab}-v`, id,'battery_voltage',rng.st,'#00f2ff',' V');
   } else {
     await drawSum(`chart-${S.tab}-comb`,S.mptts,'pv_power',rng.st,wTick,'Total Solar Output','#f59e0b');
     await drawDailyBar(`chart-${S.tab}-bar`);

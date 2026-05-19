@@ -172,7 +172,7 @@ def test_ui_battery_power_math_logic(page: Page, static_server: str):
         elif "api/v1/devices" in url:
             route.fulfill(json=mock_devices)
         elif "api/v1/current" in url:
-            route.fulfill(json={"m1": {"device": "m1", "label": "MPPT 1", "fields": {"charge_state": 3}}})
+            route.fulfill(json={"m1": {"device": "m1", "label": "MPPT 1", "fields": {"charge_state": 3, "pv_power": 50}}})
         else:
             route.fulfill(json={"points": [], "devices": {"devices": []}, "days": {"days": []}})
 
