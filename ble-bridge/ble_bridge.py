@@ -144,6 +144,32 @@ async def _wait_for_bms_in_scan(mac: str, timeout: float = 300.0) -> bool:
         _bms_seen_events.pop(mac, None)
 
 
+async def _force_stop_discovery() -> None:
+    """Call org.bluez.Adapter1.StopDiscovery() to clear any leftover BlueZ scan session.
+
+    When the container restarts, BlueZ may still have an active discovery from the
+    previous process.  Calling StopDiscovery() clears it so scanner.start() succeeds.
+    """
+    adapter = BLE_ADAPTER or "hci0"
+    try:
+        from dbus_fast.aio import MessageBus
+        from dbus_fast import BusType
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        try:
+            introspection = await bus.introspect("org.bluez", f"/org/bluez/{adapter}")
+            proxy = bus.get_proxy_object("org.bluez", f"/org/bluez/{adapter}", introspection)
+            iface = proxy.get_interface("org.bluez.Adapter1")
+            await iface.call_stop_discovery()
+            log.info("StopDiscovery sent to %s — cleared InProgress", adapter)
+        except Exception as exc:
+            log.debug("StopDiscovery: %s (ok if no session was active)", exc)
+        finally:
+            bus.disconnect()
+    except Exception as exc:
+        log.warning("_force_stop_discovery failed: %s", exc)
+    await asyncio.sleep(1.0)
+
+
 async def _scanner_stop() -> bool:
     """Stop the Victron scanner if running. Returns True if it was running."""
     if _victron_scanner is None:
@@ -478,7 +504,16 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter,
         scanner = BleakScanner(detection_callback=_callback, **adapter_kw)
 
     _victron_scanner = scanner
-    await asyncio.wait_for(scanner.start(), timeout=30.0)
+    for _attempt in range(6):
+        try:
+            await scanner.start()
+            break
+        except Exception as exc:
+            if "InProgress" in str(exc) and _attempt < 5:
+                log.warning("Scanner start busy (InProgress) — retry %d", _attempt + 1)
+                await _force_stop_discovery()
+            else:
+                raise
     try:
         while True:
             await asyncio.sleep(3600)
@@ -599,15 +634,18 @@ async def run_bms_poller(info: Dict, writer: InfluxWriter,
             log.error("[%s/%s] BMS error: %s — retry in %ds",
                       site_id, dev_id, e, _BMS_BACKOFF[backoff_idx])
         finally:
-            if scan_was_running:
-                try:
-                    await _scanner_start()
-                except Exception:
-                    pass
+            # Disconnect FIRST — clears the pending BlueZ D-Bus state left by a
+            # timed-out connect, so the scanner.start() below doesn't get InProgress.
             try:
                 await asyncio.wait_for(bms.disconnect(), timeout=10.0)
             except Exception:
                 pass
+            if scan_was_running:
+                await asyncio.sleep(2.0)  # let BlueZ settle after disconnect
+                try:
+                    await _scanner_start()
+                except Exception:
+                    pass
 
         cycles += 1
         delay = _BMS_BACKOFF[backoff_idx]
