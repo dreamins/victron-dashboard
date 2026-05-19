@@ -92,7 +92,7 @@ class InfluxRepository:
         q = f"""
 from(bucket: "{self._bucket}")
   |> range(start: -30d)
-  |> filter(fn: (r) => r._field == "battery_voltage")
+  |> filter(fn: (r) => r._measurement == "solar")
   {site_filter(site)}
   |> group(columns: ["device", "label"])
   |> last()
