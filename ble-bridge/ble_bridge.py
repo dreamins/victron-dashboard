@@ -59,6 +59,10 @@ _last_written: Dict[str, float] = {}
 # MAC → Event: fires when passive scanner first sees the MAC advertising.
 _bms_seen_events: Dict[str, asyncio.Event] = {}
 
+# MAC → {name, rssi, seen_at}: all Victron-advertising devices seen by the scanner.
+# Populated by run_ble_scanner callback; read by scan_victron() without stopping the scanner.
+_victron_seen_cache: Dict[str, Dict] = {}
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -310,41 +314,24 @@ class BridgeController:
         return results
 
     async def scan_victron(self) -> list:
-        """Passive BLE scan for nearby Victron devices not already in config.
+        """Return nearby Victron devices not already in config.
 
-        Stops the running scanner briefly, runs BleakScanner.discover for 10s,
-        filters by Victron manufacturer ID, excludes already-configured MACs,
-        returns [{mac, name, rssi}] sorted by signal strength.
+        Reads from _victron_seen_cache populated by the running scanner callback —
+        no scanner stop, no BleakScanner.discover(), no interference with the BMS
+        connection.  Cache entries older than 60s are excluded.
         """
-        from bleak import BleakScanner
-
-        was_running = await _scanner_stop()
-        if was_running:
-            await asyncio.sleep(0.5)
-
-        try:
-            adapter_kw = {"bluez": {"adapter": BLE_ADAPTER}} if BLE_ADAPTER else {}
-            devices = await BleakScanner.discover(timeout=10.0, **adapter_kw)
-        finally:
-            if was_running:
-                try:
-                    await _scanner_start()
-                except Exception:
-                    pass
-
+        now = time.monotonic()
         configured = {v["mac"].upper() for v in self.device_map.values()
                       if "mac" in v}
         results = []
-        for d in devices:
-            mfr = d.metadata.get("manufacturer_data") or {}
-            if VICTRON_MFR_ID not in mfr:
+        for mac, info in _victron_seen_cache.items():
+            if now - info["seen_at"] > 60.0:
                 continue
-            mac = d.address.upper()
             if mac in configured:
                 continue
-            results.append({"mac": mac, "name": d.name or mac, "rssi": d.rssi})
+            results.append({"mac": mac, "name": info["name"], "rssi": info["rssi"]})
 
-        log.info("scan-victron: %d unconfigured Victron device(s) found", len(results))
+        log.info("scan-victron: %d unconfigured Victron device(s) in cache", len(results))
         return sorted(results, key=lambda x: -(x["rssi"] or -999))
 
 
@@ -372,6 +359,13 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter,
 
         if VICTRON_MFR_ID not in adv_data.manufacturer_data:
             return
+
+        _victron_seen_cache[mac] = {
+            "name":    device.name or mac,
+            "rssi":    adv_data.rssi,
+            "seen_at": time.monotonic(),
+        }
+
         info = device_map.get(mac)
         if not info:
             return
