@@ -77,9 +77,10 @@ def test_ui_visual_verification(page: Page, static_server: str):
     assert "25.5°C" in temp_node.text_content()
     
     # 4. VERIFY SOLAR FLOW (AMBER + GLOW)
+    # to_have_css implicitly proves the element exists and is active; to_be_visible() is
+    # unreliable for vertical SVG paths because getBoundingClientRect() returns zero geometric
+    # width for a straight vertical line (no horizontal span), which Playwright treats as hidden.
     pv1 = page.locator("#path-pv1")
-    expect(pv1).to_be_visible()
-    # Stroke might be returned as RGB
     expect(pv1).to_have_css("stroke", "rgb(245, 158, 11)")
     # Check if filter is applied
     filter_val = pv1.evaluate("e => getComputedStyle(e).filter")

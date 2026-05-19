@@ -178,7 +178,7 @@ body.light .picker-card:hover { box-shadow:0 12px 32px rgba(0,0,0,0.1); }
   border-right:2px solid var(--border);
 }
 #flow { padding:4px 20px; flex-shrink:0; background:var(--flow-grad); }
-#flow svg { width:100%; filter:drop-shadow(0 0 30px rgba(0,0,0,0.15)); }
+#flow svg { width:100%; height:350px; filter:drop-shadow(0 0 30px rgba(0,0,0,0.15)); }
 body:not(.light) #flow svg { filter:drop-shadow(0 0 30px rgba(0,0,0,0.3)); }
 
 .nb { fill:var(--node-fill); stroke:var(--node-stroke); stroke-width:1.5; }
@@ -474,95 +474,7 @@ body.light .card:hover { border-color:rgba(0,0,0,0.15); }
 <div id="wrap">
   <div id="left">
     <div id="flow">
-      <svg viewBox="0 0 500 350" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="g-solar" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#ffcc33"/><stop offset="100%" stop-color="#f97316"/>
-          </linearGradient>
-          <linearGradient id="g-batt-hi" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stop-color="#3b82f6"/><stop offset="60%" stop-color="#00f2ff"/><stop offset="100%" stop-color="#10b981"/>
-          </linearGradient>
-          <linearGradient id="g-batt-lo" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stop-color="#ef4444"/><stop offset="100%" stop-color="#f59e0b"/>
-          </linearGradient>
-          <filter id="glow" x="-50" y="-50" width="600" height="450" filterUnits="userSpaceOnUse">
-            <feGaussianBlur stdDeviation="3.5" result="b"/>
-            <feComposite in="SourceGraphic" in2="b" operator="over"/>
-          </filter>
-          <pattern id="solar-cell" x="0" y="0" width="26" height="22" patternUnits="userSpaceOnUse">
-            <rect x="1" y="1" width="24" height="20" rx="2"
-              fill="rgba(30,58,138,0.22)" stroke="rgba(255,204,51,0.35)" stroke-width="0.6"/>
-            <line x1="12.5" y1="1" x2="12.5" y2="21" stroke="rgba(255,204,51,0.15)" stroke-width="0.5"/>
-          </pattern>
-          <clipPath id="batt-clip"><rect x="154" y="254" width="192" height="74" rx="7"/></clipPath>
-        </defs>
-
-        <rect id="pv1-box" class="nb" x="20" y="12" width="160" height="68" rx="12"/>
-        <rect x="24" y="16" width="152" height="60" rx="9" fill="url(#solar-cell)" opacity="0.9"/>
-        <line x1="24" y1="37" x2="176" y2="37" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <line x1="24" y1="55" x2="176" y2="55" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <line x1="76" y1="16" x2="76" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <line x1="124" y1="16" x2="124" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <text id="pv1-label" class="nl" x="100" y="29" text-anchor="middle" style="font-size:9px">-</text>
-        <text class="nv" id="flow-pv1-volt" x="100" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">-</text>
-        <text class="nv" id="flow-pv1-val" x="100" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">-</text>
-
-        <rect id="pv2-box" class="nb" x="320" y="12" width="160" height="68" rx="12"/>
-        <rect x="324" y="16" width="152" height="60" rx="9" fill="url(#solar-cell)" opacity="0.9"/>
-        <line x1="324" y1="37" x2="476" y2="37" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <line x1="324" y1="55" x2="476" y2="55" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <line x1="376" y1="16" x2="376" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <line x1="424" y1="16" x2="424" y2="76" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
-        <text id="pv2-label" class="nl" x="400" y="29" text-anchor="middle" style="font-size:9px">-</text>
-        <text class="nv" id="flow-pv2-volt" x="400" y="49" text-anchor="middle" style="font-size:11px;opacity:0.75">-</text>
-        <text class="nv" id="flow-pv2-val" x="400" y="68" text-anchor="middle" style="font-size:14px;font-weight:800">-</text>
-
-        <rect id="mppt1-box" class="nb" x="20" y="112" width="160" height="86" rx="20" style="cursor:pointer" onclick="switchTab(0)"/>
-        <text id="mppt1-label" class="nl" x="100" y="134" text-anchor="middle" style="cursor:pointer" onclick="switchTab(0)">-</text>
-        <rect id="mppt1-status-bg" x="58" y="140" width="84" height="18" rx="9" fill="#1f2937"/>
-        <text id="mppt1-status-txt" class="nl" x="100" y="153" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(0)">-</text>
-        <text class="nv nbig" id="mppt1-flow-val" x="100" y="184" text-anchor="middle" style="cursor:pointer" onclick="switchTab(0)">-</text>
-
-        <rect id="mppt2-box" class="nb" x="320" y="112" width="160" height="86" rx="20" style="cursor:pointer" onclick="switchTab(1)"/>
-        <text id="mppt2-label" class="nl" x="400" y="134" text-anchor="middle" style="cursor:pointer" onclick="switchTab(1)">-</text>
-        <rect id="mppt2-status-bg" x="358" y="140" width="84" height="18" rx="9" fill="#1f2937"/>
-        <text id="mppt2-status-txt" class="nl" x="400" y="153" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(1)">-</text>
-        <text class="nv nbig" id="mppt2-flow-val" x="400" y="184" text-anchor="middle" style="cursor:pointer" onclick="switchTab(1)">-</text>
-
-        <g onclick="switchTab(2)" style="cursor:pointer">
-          <rect class="nb" x="150" y="248" width="200" height="84" rx="10"/>
-          <line x1="200" y1="252" x2="200" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
-          <line x1="250" y1="252" x2="250" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
-          <line x1="300" y1="252" x2="300" y2="328" stroke="var(--node-stroke)" stroke-width="1.5"/>
-          <rect x="162" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
-          <text x="172" y="248" text-anchor="middle" style="fill:var(--sub);font-size:10px;font-weight:900">&minus;</text>
-          <rect x="318" y="238" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
-          <text x="328" y="248" text-anchor="middle" style="fill:#ef4444;font-size:10px;font-weight:900">+</text>
-          <rect id="batt-fill-bar" x="154" y="252" width="0" height="76" fill="url(#g-batt-hi)" opacity="0.45" clip-path="url(#batt-clip)"/>
-          <text class="nl" x="250" y="266" text-anchor="middle" style="font-size:9px;letter-spacing:0.5px">LiFePO4 &middot; Battery</text>
-          <text class="nv" id="flow-batt-v" x="208" y="300" text-anchor="middle" style="font-size:19px;font-weight:800;fill:var(--batt)">-</text>
-          <text id="flow-batt-soc" style="fill:var(--sub);font-size:12px;font-weight:700" x="308" y="290" text-anchor="middle">-</text>
-          <text class="nv" id="flow-batt-t" x="308" y="308" text-anchor="middle" style="font-size:12px;fill:#9ca3af">-</text>
-        </g>
-
-        <g id="mppt1-load-grp" style="display:none">
-          <circle class="nb" cx="42" cy="286" r="24"/>
-          <text id="mppt1-load-val" class="nv" x="42" y="291" text-anchor="middle" style="font-size:11px">-</text>
-          <text class="nl" x="42" y="318" text-anchor="middle">Load</text>
-        </g>
-        <g id="mppt2-load-grp" style="display:none">
-          <circle class="nb" cx="458" cy="286" r="24"/>
-          <text id="mppt2-load-val" class="nv" x="458" y="291" text-anchor="middle" style="font-size:11px">-</text>
-          <text class="nl" x="458" y="318" text-anchor="middle">Load</text>
-        </g>
-
-        <path id="path-pv1"        class="fl" d="M100,82  L100.01,110"/>
-        <path id="path-pv2"        class="fl" d="M400,82  L400.01,110"/>
-        <path id="path-mppt1"      class="fl" d="M100,200 C100,230 172,230 172,238"/>
-        <path id="path-mppt2"      class="fl" d="M400,200 C400,230 328,230 328,238"/>
-        <path id="path-mppt1-load" class="fl" d="M100,200 L55,266"  style="display:none"/>
-        <path id="path-mppt2-load" class="fl" d="M400,200 L445,266" style="display:none"/>
-      </svg>
+      <svg id="flow-svg" viewBox="0 0 500 350"></svg>
     </div>
     <div id="cards"></div>
   </div>
@@ -1022,64 +934,203 @@ function renderHeader(){
 }
 
 function renderFlow(){
-  const m1=S.current[S.mptts[0]], m2=S.current[S.mptts[1]];
-  const bs=S.bsense?S.current[S.bsense]:null;
+  const key=S.mptts.join(',')+'\x01'+S.chargers.join(',');
+  if(key!==_flowKey){ _flowKey=key; _buildFlowSvg(); }
+  _updateFlowValues();
+}
 
-  const lbl1=m1?.label||S.devices.find(d=>d.id===S.mptts[0])?.label||'-';
-  const lbl2=m2?.label||S.devices.find(d=>d.id===S.mptts[1])?.label||'-';
-  setText('pv1-label',lbl1); setText('pv2-label',lbl2);
-  setText('mppt1-label',lbl1); setText('mppt2-label',lbl2);
+function _buildFlowSvg(){
+  const el=document.getElementById('flow-svg'); if(!el) return;
+  const N=S.mptts.length, M=S.chargers.length;
 
-  setPvNode(1,m1); setPvNode(2,m2);
-  updateMpptNode(1,m1); updateMpptNode(2,m2);
+  // Fixed Y positions (match original design proportions)
+  const PV_Y=12, MP_Y=112, BT_Y=248, SVG_H=350;
+  const MW=160, MH=86, PH=68, BW=200, BH=84, CW=160, CH=84;
+  const PAD=20, COL_SPAN=300; // 300px between MPPT centers → matches original 100/400 layout
+  const BC_GAP=20; // gap between battery right and charger left
 
+  // X layout: for N=1 center MPPT over battery; for N>=2 spread by COL_SPAN
+  let mpptCX, BT_X, SVG_W_base;
+  if(N<=1){
+    BT_X=PAD;
+    mpptCX=()=>PAD+BW/2; // MPPT centered over battery
+    SVG_W_base=PAD+Math.max(MW,BW)+PAD;
+  } else {
+    mpptCX=i=>PAD+MW/2+i*COL_SPAN; // i=0 → 100, i=1 → 400 (same as original)
+    const midCX=(mpptCX(0)+mpptCX(N-1))/2;
+    BT_X=Math.round(midCX-BW/2);
+    SVG_W_base=mpptCX(N-1)+MW/2+PAD;
+  }
+
+  const BT_LTERM=BT_X+14, BT_RTERM=BT_X+BW-14;
+  const CH_X=BT_X+BW+BC_GAP;
+  const SVG_W=M>0?Math.max(SVG_W_base,CH_X+CW+PAD):SVG_W_base;
+
+  // Battery terminal connection X for MPPT i (spread across battery top)
+  function battConnX(i){
+    if(N<=1) return BT_X+BW/2;
+    return Math.round(BT_X+22+i*(BW-44)/(N-1));
+  }
+  // Load node: offset 58px outside outermost MPPT; circle at LOAD_CY=BT_Y+38=286
+  const LOAD_OFFSET=58, LOAD_R=24, LOAD_CY=BT_Y+38;
+  function loadCircleCX(i){ return i===0?mpptCX(0)-LOAD_OFFSET:mpptCX(N-1)+LOAD_OFFSET; }
+
+  let h=`<defs>
+  <linearGradient id="g-batt-hi" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stop-color="#3b82f6"/>
+    <stop offset="60%" stop-color="#00f2ff"/>
+    <stop offset="100%" stop-color="#10b981"/>
+  </linearGradient>
+  <linearGradient id="g-batt-lo" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stop-color="#ef4444"/>
+    <stop offset="100%" stop-color="#f59e0b"/>
+  </linearGradient>
+  <filter id="glow" x="-50" y="-50" width="${SVG_W+200}" height="${SVG_H+100}" filterUnits="userSpaceOnUse">
+    <feGaussianBlur stdDeviation="3.5" result="b"/>
+    <feComposite in="SourceGraphic" in2="b" operator="over"/>
+  </filter>
+  <pattern id="solar-cell" x="0" y="0" width="26" height="22" patternUnits="userSpaceOnUse">
+    <rect x="1" y="1" width="24" height="20" rx="2" fill="rgba(30,58,138,0.22)" stroke="rgba(255,204,51,0.35)" stroke-width="0.6"/>
+    <line x1="12.5" y1="1" x2="12.5" y2="21" stroke="rgba(255,204,51,0.15)" stroke-width="0.5"/>
+  </pattern>
+  <clipPath id="batt-clip"><rect x="${BT_X+4}" y="${BT_Y+4}" width="${BW-8}" height="${BH-8}" rx="7"/></clipPath>
+</defs>`;
+
+  // PV panels + MPPT boxes + connecting paths
+  for(let i=0;i<N;i++){
+    const cx=mpptCX(i), pvX=cx-MW/2, bcx=battConnX(i);
+    const lcx=loadCircleCX(i);
+    const ldx=cx-lcx, ldy=(MP_Y+MH)-LOAD_CY;
+    const lmag=Math.hypot(ldx,ldy)||1;
+    const lepx=Math.round(lcx+LOAD_R*ldx/lmag);
+    const lepy=Math.round(LOAD_CY+LOAD_R*ldy/lmag);
+    h+=`
+<rect id="pv${i+1}-box" class="nb" x="${pvX}" y="${PV_Y}" width="${MW}" height="${PH}" rx="12"/>
+<rect x="${pvX+4}" y="${PV_Y+4}" width="${MW-8}" height="${PH-8}" rx="9" fill="url(#solar-cell)" opacity="0.9"/>
+<line x1="${pvX+4}" y1="${PV_Y+25}" x2="${pvX+MW-4}" y2="${PV_Y+25}" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+<line x1="${pvX+4}" y1="${PV_Y+43}" x2="${pvX+MW-4}" y2="${PV_Y+43}" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+<line x1="${pvX+Math.round(MW/3)}" y1="${PV_Y+4}" x2="${pvX+Math.round(MW/3)}" y2="${PV_Y+PH-4}" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+<line x1="${pvX+Math.round(2*MW/3)}" y1="${PV_Y+4}" x2="${pvX+Math.round(2*MW/3)}" y2="${PV_Y+PH-4}" stroke="rgba(255,204,51,0.18)" stroke-width="1"/>
+<text id="pv${i+1}-label" class="nl" x="${cx}" y="${PV_Y+17}" text-anchor="middle" style="font-size:9px">-</text>
+<text class="nv" id="flow-pv${i+1}-volt" x="${cx}" y="${PV_Y+37}" text-anchor="middle" style="font-size:11px;opacity:0.75">-</text>
+<text class="nv" id="flow-pv${i+1}-val" x="${cx}" y="${PV_Y+56}" text-anchor="middle" style="font-size:14px;font-weight:800">-</text>
+<rect id="mppt${i+1}-box" class="nb" x="${pvX}" y="${MP_Y}" width="${MW}" height="${MH}" rx="20" style="cursor:pointer" onclick="switchTab(${i})"/>
+<text id="mppt${i+1}-label" class="nl" x="${cx}" y="${MP_Y+22}" text-anchor="middle" style="cursor:pointer" onclick="switchTab(${i})">-</text>
+<rect id="mppt${i+1}-status-bg" x="${cx-42}" y="${MP_Y+28}" width="84" height="18" rx="9" fill="#1f2937"/>
+<text id="mppt${i+1}-status-txt" class="nl" x="${cx}" y="${MP_Y+41}" text-anchor="middle" style="fill:white;font-size:9px;cursor:pointer" onclick="switchTab(${i})">-</text>
+<text class="nv nbig" id="mppt${i+1}-flow-val" x="${cx}" y="${MP_Y+72}" text-anchor="middle" style="cursor:pointer" onclick="switchTab(${i})">-</text>
+<path id="path-pv${i+1}" class="fl" d="M${cx},${PV_Y+PH} L${cx},${MP_Y}"/>
+<path id="path-mppt${i+1}" class="fl" d="M${cx},${MP_Y+MH} C${cx},${BT_Y-20} ${bcx},${BT_Y-20} ${bcx},${BT_Y-10}"/>
+<g id="mppt${i+1}-load-grp" style="display:none">
+  <circle class="nb" cx="${lcx}" cy="${LOAD_CY}" r="${LOAD_R}"/>
+  <text id="mppt${i+1}-load-val" class="nv" x="${lcx}" y="${LOAD_CY+5}" text-anchor="middle" style="font-size:11px">-</text>
+  <text class="nl" x="${lcx}" y="${LOAD_CY+22}" text-anchor="middle">Load</text>
+</g>
+<path id="path-mppt${i+1}-load" class="fl" d="M${cx},${MP_Y+MH} L${lepx},${lepy}" style="display:none"/>`;
+  }
+
+  // Battery node
+  const battCx=BT_X+BW/2;
+  const divs=[1,2].map(d=>`<line x1="${BT_X+Math.round(BW*d/3)}" y1="${BT_Y+4}" x2="${BT_X+Math.round(BW*d/3)}" y2="${BT_Y+BH-4}" stroke="var(--node-stroke)" stroke-width="1.5"/>`).join('');
+  h+=`
+<g onclick="switchTabByKind('battery')" style="cursor:pointer">
+  <rect class="nb" x="${BT_X}" y="${BT_Y}" width="${BW}" height="${BH}" rx="10"/>
+  ${divs}
+  <rect x="${BT_LTERM-10}" y="${BT_Y-12}" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
+  <text x="${BT_LTERM}" y="${BT_Y-2}" text-anchor="middle" style="fill:var(--sub);font-size:10px;font-weight:900">&minus;</text>
+  <rect x="${BT_RTERM-10}" y="${BT_Y-12}" width="20" height="12" rx="4" fill="var(--node-fill)" stroke="var(--node-stroke)" stroke-width="1.5"/>
+  <text x="${BT_RTERM}" y="${BT_Y-2}" text-anchor="middle" style="fill:#ef4444;font-size:10px;font-weight:900">+</text>
+  <rect id="batt-fill-bar" x="${BT_X+4}" y="${BT_Y+4}" width="0" height="${BH-8}" fill="url(#g-batt-hi)" opacity="0.45" clip-path="url(#batt-clip)"/>
+  <text class="nl" x="${battCx}" y="${BT_Y+18}" text-anchor="middle" style="font-size:9px;letter-spacing:0.5px">LiFePO4 &middot; Battery</text>
+  <text class="nv" id="flow-batt-v" x="${battCx-30}" y="${BT_Y+52}" text-anchor="middle" style="font-size:19px;font-weight:800;fill:var(--batt)">-</text>
+  <text id="flow-batt-soc" style="fill:var(--sub);font-size:12px;font-weight:700" x="${battCx+40}" y="${BT_Y+42}" text-anchor="middle">-</text>
+  <text class="nv" id="flow-batt-t" x="${battCx+40}" y="${BT_Y+60}" text-anchor="middle" style="font-size:12px;fill:#9ca3af">-</text>
+</g>`;
+
+  // Charger nodes (stacked to the right of battery)
+  for(let m=0;m<M;m++){
+    const chY=BT_Y+m*(CH+10);
+    const chCx=CH_X+CW/2;
+    const arcY=BT_Y-32;
+    const chId=S.chargers[m];
+    h+=`
+<g id="charger-grp-${m}" style="cursor:pointer" onclick="switchTabByKind('charger','${chId}')">
+  <rect id="charger-box-${m}" class="nb" x="${CH_X}" y="${chY}" width="${CW}" height="${CH}" rx="20"/>
+  <text x="${chCx}" y="${chY+19}" text-anchor="middle" style="fill:#60a5fa;font-size:7.5px;letter-spacing:0.8px;font-weight:700">AC ~</text>
+  <text id="charger-label-${m}" class="nl" x="${chCx}" y="${chY+34}" text-anchor="middle">-</text>
+  <rect id="charger-status-bg-${m}" x="${chCx-42}" y="${chY+38}" width="84" height="18" rx="9" fill="#1f2937"/>
+  <text id="charger-status-txt-${m}" class="nl" x="${chCx}" y="${chY+51}" text-anchor="middle" style="fill:white;font-size:9px">-</text>
+  <text class="nv nbig" id="charger-flow-val-${m}" x="${chCx}" y="${chY+74}" text-anchor="middle">-</text>
+</g>
+<path id="path-charger-${m}" class="fl" d="M${chCx},${chY} C${chCx},${arcY} ${BT_RTERM},${arcY} ${BT_RTERM},${BT_Y-10}"/>`;
+  }
+
+  el.innerHTML=h;
+  el.setAttribute('viewBox',`0 0 ${SVG_W} ${SVG_H}`);
+  void el.getBoundingClientRect(); // force synchronous layout so paths have non-zero bounding boxes
+}
+
+function _updateFlowValues(){
+  const m0=S.current[S.mptts[0]], m1=S.current[S.mptts[1]];
+
+  // MPPT panels + boxes + paths
+  for(let i=0;i<S.mptts.length;i++){
+    const id=S.mptts[i];
+    const d=S.current[id];
+    const lbl=d?.label||S.devices.find(x=>x.id===id)?.label||'-';
+    setText(`pv${i+1}-label`,lbl);
+    setText(`mppt${i+1}-label`,lbl);
+    setPvNode(i+1,d);
+    updateMpptNode(i+1,d);
+    setLoadNode(i+1,d);
+    const pv=pvWatts(d), cs=Math.round(d?.fields?.charge_state??0);
+    updatePath(`path-pv${i+1}`,pv??0,'#f59e0b',40);
+    updatePath(`path-mppt${i+1}`,d?.fields?.charge_current??0,STATES[cs]?.[1]||'#64748b',4);
+  }
+
+  // Battery
   if(S.siteUi?.battery_display==='bms'&&S.bmsDevice){
-    const bms=S.battData[S.bmsDevice];
-    const bmsF=bms?.fields||{};
-    S.bvolt=bmsF.battery_voltage??m1?.fields?.battery_voltage??m2?.fields?.battery_voltage??null;
+    const bmsF=S.battData[S.bmsDevice]?.fields||{};
+    S.bvolt=bmsF.battery_voltage??m0?.fields?.battery_voltage??m1?.fields?.battery_voltage??null;
     S.bsoc=bmsF.soc??null;
     const charging=bmsF.battery_current!=null&&bmsF.battery_current>0.1;
-    setText('flow-batt-v', S.bvolt!=null?S.bvolt.toFixed(2)+' V':'-');
-    setText('flow-batt-soc', charging?'chg':(S.bsoc!=null?S.bsoc.toFixed(0)+'%':'-'));
+    setText('flow-batt-v',S.bvolt!=null?S.bvolt.toFixed(2)+' V':'-');
+    setText('flow-batt-soc',charging?'chg':(S.bsoc!=null?S.bsoc.toFixed(0)+'%':'-'));
     setText('flow-batt-t','');
     const bar=document.getElementById('batt-fill-bar');
     if(bar&&S.bsoc!=null){
-      bar.setAttribute('width',String(S.bsoc/100*192));
+      bar.setAttribute('width',String(S.bsoc/100*(192)));
       bar.setAttribute('fill',S.bsoc<20?'url(#g-batt-lo)':'url(#g-batt-hi)');
     }
   } else {
-    S.bvolt=bs?.fields?.battery_voltage
-           ??m1?.fields?.battery_voltage
-           ??m2?.fields?.battery_voltage??null;
-    const charging=S.mptts.some(id=>{
-      const cs=S.current[id]?.fields?.charge_state;
-      return cs===3||cs===4;
-    });
+    const bs=S.bsense?S.current[S.bsense]:null;
+    S.bvolt=bs?.fields?.battery_voltage??m0?.fields?.battery_voltage??m1?.fields?.battery_voltage??null;
+    const charging=S.mptts.some(id=>{const cs=S.current[id]?.fields?.charge_state;return cs===3||cs===4;});
     S.bsoc=(S.bvolt!=null&&!charging)?lfp4Soc(S.bvolt):null;
     if(S.bvolt!=null){
       setText('flow-batt-v',S.bvolt.toFixed(2)+' V');
       setText('flow-batt-soc',charging?'chg':S.bsoc.toFixed(0)+'%');
       const bar=document.getElementById('batt-fill-bar');
-      if(bar){
-        bar.setAttribute('width',String(S.bsoc/100*192));
-        bar.setAttribute('fill',S.bsoc<20?'url(#g-batt-lo)':'url(#g-batt-hi)');
-      }
-    } else {
-      setText('flow-batt-v','-'); setText('flow-batt-soc','-');
-    }
+      if(bar){bar.setAttribute('width',String(S.bsoc/100*192));bar.setAttribute('fill',S.bsoc<20?'url(#g-batt-lo)':'url(#g-batt-hi)');}
+    } else {setText('flow-batt-v','-');setText('flow-batt-soc','-');}
     const temp=bs?.fields?.temperature??null;
     setText('flow-batt-t',temp!=null?temp.toFixed(1)+'°C':'');
   }
 
-  setLoadNode(1,m1); setLoadNode(2,m2);
-
-  const pv1=pvWatts(m1),pv2=pvWatts(m2);
-  const c1=Math.round(m1?.fields?.charge_state??0),c2=Math.round(m2?.fields?.charge_state??0);
-  const col1=STATES[c1]?.[1]||'#64748b',col2=STATES[c2]?.[1]||'#64748b';
-  updatePath('path-pv1',   pv1??0,                        '#f59e0b',40);
-  updatePath('path-pv2',   pv2??0,                        '#f59e0b',40);
-  updatePath('path-mppt1', m1?.fields?.charge_current??0, col1,      4);
-  updatePath('path-mppt2', m2?.fields?.charge_current??0, col2,      4);
+  // Charger nodes
+  for(let m=0;m<S.chargers.length;m++){
+    const id=S.chargers[m], cDev=S.current[id], cF=cDev?.fields||{};
+    const cs=Math.round(cF.charge_state??0), st=STATES[cs]||STATES[0], cc=cF.charge_current??0;
+    setText(`charger-label-${m}`,cDev?.label||S.devices.find(d=>d.id===id)?.label||id);
+    const sTxt=document.getElementById(`charger-status-txt-${m}`);
+    const sBg=document.getElementById(`charger-status-bg-${m}`);
+    const cBox=document.getElementById(`charger-box-${m}`);
+    if(sTxt){sTxt.textContent=st[0];sTxt.style.fill=st[1]==='#374151'?'#9ca3af':'white';}
+    if(sBg) sBg.setAttribute('fill',st[1]+(isLight()?'66':'33'));
+    if(cBox) cBox.style.stroke=cs>0?st[1]+'dd':'';
+    setText(`charger-flow-val-${m}`,fv(cDev,'charge_current','A'));
+    updatePath(`path-charger-${m}`,cc,'#60a5fa',10);
+  }
 }
 
 function pvWatts(m){
@@ -1182,7 +1233,7 @@ function updatePath(id,val,col,maxVal){
 }
 
 // ── Cards ──────────────────────────────────────────────────────────────
-let _cardsKey='';
+let _cardsKey='', _flowKey='';
 
 function renderCards(){
   const cont=document.getElementById('cards');
@@ -1326,6 +1377,11 @@ function switchTab(idx){
 }
 
 function closeMobileDetail(){ document.body.classList.remove('mobile-detail'); }
+
+function switchTabByKind(kind,id){
+  const idx=id?S.tabDefs.findIndex(t=>t.kind===kind&&t.id===id):S.tabDefs.findIndex(t=>t.kind===kind);
+  if(idx>=0) switchTab(idx);
+}
 
 function switchRange(l){
   S.range=l;
