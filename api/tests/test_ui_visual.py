@@ -89,7 +89,7 @@ def test_ui_visual_verification(page: Page, static_server: str):
     # 5. VERIFY CHARGING FLOW (DYNAMIC COLOR)
     # Bulk = Blue
     mppt1_path = page.locator("#path-mppt1")
-    expect(mppt1_path).to_have_css("stroke", "rgb(59, 130, 246)")
+    expect(mppt1_path).to_have_css("stroke", "rgb(96, 165, 250)")
     # Float = Green
     mppt2_path = page.locator("#path-mppt2")
     expect(mppt2_path).to_have_css("stroke", "rgb(16, 185, 129)")

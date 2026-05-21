@@ -505,7 +505,7 @@ const STATES={
   0:['Not charging','#374151'],
   1:['Low power',   '#374151'],
   2:['Fault',       '#ef4444'],
-  3:['Bulk',        '#3b82f6'],
+  3:['Bulk',        '#60a5fa'],
   4:['Absorption',  '#f59e0b'],
   5:['Float',       '#10b981'],
   6:['Storage',     '#10b981'],
@@ -893,6 +893,7 @@ function buildTabDefs(){
         </div>`;
       if(d.kind==='battery') return `
         <div id="panel-${i}" class="chart-panel ${active}">
+          ${S.bmsDevice?`<div class="chart-card"><div class="chart-title">State of Charge</div><div class="chart-container"><canvas id="chart-${i}-s"></canvas></div></div>`:''}
           <div class="chart-card"><div class="chart-title">Battery Voltage - All Sources</div><div class="chart-container"><canvas id="chart-${i}-v"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Temperature</div><div class="chart-container"><canvas id="chart-${i}-t"></canvas></div></div>
           <div class="chart-card"><div class="chart-title">Total Charging Current</div><div class="chart-container"><canvas id="chart-${i}-c"></canvas></div></div>
@@ -1122,16 +1123,22 @@ function _updateFlowValues(){
   // Charger nodes
   for(let m=0;m<S.chargers.length;m++){
     const id=S.chargers[m], cDev=S.current[id], cF=cDev?.fields||{};
-    const cs=Math.round(cF.charge_state??0), st=STATES[cs]||STATES[0], cc=cF.charge_current??0;
+    const chargerOnline=S.devices.find(d=>d.id===id)?.online===true;
+    const cs=Math.round(cF.charge_state??0), st=STATES[cs]||STATES[0];
+    const cc=chargerOnline?(cF.charge_current??0):0;
     const cLbl=cDev?.label||S.devices.find(d=>d.id===id)?.label||id;
     setText(`charger-label-${m}`,cLbl.length>13?cLbl.slice(0,12)+'…':cLbl);
     const sTxt=document.getElementById(`charger-status-txt-${m}`);
     const sBg=document.getElementById(`charger-status-bg-${m}`);
     const cBox=document.getElementById(`charger-box-${m}`);
-    if(sTxt){sTxt.textContent=st[0];sTxt.style.fill=st[1]==='#374151'?'#9ca3af':'white';}
+    if(sTxt){
+      sTxt.textContent=st[0];
+      if(isLight()){sTxt.style.fill='#020617';sTxt.style.fontWeight='800';}
+      else{sTxt.style.fill=st[1]==='#374151'?'#9ca3af':'white';}
+    }
     if(sBg) sBg.setAttribute('fill',st[1]+(isLight()?'66':'33'));
     if(cBox) cBox.style.stroke=cs>0?st[1]+'dd':'';
-    setText(`charger-flow-val-${m}`,fv(cDev,'charge_current','A'));
+    setText(`charger-flow-val-${m}`,chargerOnline?fv(cDev,'charge_current','A'):'-');
     const bmsCurr=S.bmsDevice?Math.abs(S.battData[S.bmsDevice]?.fields?.battery_current??0):0;
     const confirmed=cc>0.1&&bmsCurr>0.1&&Math.abs(cc-bmsCurr)<2;
     const pathCol=confirmed?'#10b981':(cc>0.1?'#f59e0b':'#60a5fa');
@@ -1417,6 +1424,7 @@ async function updateCharts(){
     const tempIds=S.tempProviders.length>0?S.tempProviders.map(d=>d.id):(S.bsense?[S.bsense]:[]);
     if(tempIds.length>0) await drawMulti(`chart-${S.tab}-t`,tempIds,'temperature',rng.st,'°C');
     if(S.bmsDevice){
+      await drawLine(`chart-${S.tab}-s`,S.bmsDevice,'soc',rng.st,'#00f2ff',' %');
       await drawLine(`chart-${S.tab}-c`,S.bmsDevice,'battery_current',rng.st,'#10b981',' A',v=>-v);
       await drawBmsPower(`chart-${S.tab}-p`,S.bmsDevice,rng.st,wTick,'Total Charging Power','#f59e0b');
     } else {
