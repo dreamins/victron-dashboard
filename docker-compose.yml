@@ -19,7 +19,7 @@ services:
       - MQTT_DECODER_PASS=${MQTT_DECODER_PASS}
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-    restart: unless-stopped
+    restart: always
 
   influxdb:
     image: influxdb:2.7
@@ -35,7 +35,7 @@ services:
       - DOCKER_INFLUXDB_INIT_BUCKET=victron
       - DOCKER_INFLUXDB_INIT_RETENTION=720h
       - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
-    restart: unless-stopped
+    restart: always
 
   ble-decoder:
     build: ./decoder
@@ -54,7 +54,7 @@ services:
       - SITES_FILE=/app/sites.json
     volumes:
       - ./config/sites.json:/app/sites.json:ro
-    restart: unless-stopped
+    restart: always
 
   solar-api:
     build: ./api
@@ -72,7 +72,7 @@ services:
       - BLE_BRIDGE_URL=http://ble-bridge:8088
     volumes:
       - ./config/sites.json:/app/sites.json
-    restart: unless-stopped
+    restart: always
 
   ble-bridge:
     build: ./ble-bridge
@@ -91,7 +91,7 @@ services:
       - INFLUX_BUCKET=victron
       - SITES_FILE=/app/sites.json
       - BLE_ADAPTER=${BLE_ADAPTER:-}
-    restart: unless-stopped
+    restart: always
 
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
@@ -114,7 +114,7 @@ services:
       - OAUTH2_PROXY_COOKIE_HTTPONLY=true
       - OAUTH2_PROXY_COOKIE_SAMESITE=lax
       - OAUTH2_PROXY_COOKIE_EXPIRE=24h
-    restart: unless-stopped
+    restart: always
 
   nginx:
     image: nginx:alpine
@@ -131,7 +131,7 @@ services:
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
-    restart: unless-stopped
+    restart: always
 
 volumes:
   influxdb-data:
