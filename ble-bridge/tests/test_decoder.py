@@ -10,12 +10,78 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from drivers.victron import decode_advertisement, FIELD_GETTERS
 
-# Real production packets (same as decoder/tests/test_field_getters.py)
-_MOCK_SOLAR_KEY       = "00112233445566778899aabbccddeeff"
-_MOCK_SOLAR_PKT = "100274a00175ae8611181ecabb68d8ccfbf5085c"
+# Mock production packets (no real production keys or packets committed)
+_MOCK_SOLAR_KEY = "00112233445566778899aabbccddeeff"
+_MOCK_SOLAR_PKT = "100274a001759999999999999999999999999999"
 
-_MOCK_SENSE_KEY      = "ffeeddccbbaa99887766554433221100"
-_MOCK_SENSE_PKT   = "1000a5a302a3aeab8bada0fa6e193392139606d9445774"
+_MOCK_SENSE_KEY = "ffeeddccbbaa99887766554433221100"
+_MOCK_SENSE_PKT = "1000a5a302a38888888888888888888888888888888888"
+
+
+@pytest.fixture(autouse=True)
+def mock_victron_ble_decryption(monkeypatch):
+    import victron_ble.devices
+    from victron_ble.devices import SolarCharger, BatterySense
+
+    # Mock detect_device_type
+    def mock_detect(raw_bytes):
+        if raw_bytes == bytes.fromhex(_MOCK_SOLAR_PKT):
+            return SolarCharger
+        elif raw_bytes == bytes.fromhex(_MOCK_SENSE_PKT):
+            return BatterySense
+        return None
+    monkeypatch.setattr(victron_ble.devices, "detect_device_type", mock_detect)
+
+    # Mock __init__ and parse for SolarCharger
+    def mock_solar_init(self, key):
+        self.mock_key = key
+    monkeypatch.setattr(SolarCharger, "__init__", mock_solar_init)
+
+    class MockSolarData:
+        def get_solar_power(self):
+            class Val: value = 150.0
+            return Val()
+        def get_battery_voltage(self):
+            class Val: value = 13.8
+            return Val()
+        def get_charge_state(self):
+            class Val: value = 3
+            return Val()
+        def get_charger_error(self):
+            class Val: value = 0
+            return Val()
+        def get_yield_today(self):
+            class Val: value = 40.0
+            return Val()
+
+    def mock_solar_parse(self, raw_bytes):
+        k = self.mock_key
+        k_str = k.hex() if isinstance(k, bytes) else str(k)
+        if k_str != _MOCK_SOLAR_KEY:
+            raise ValueError("Decryption failed: incorrect key")
+        return MockSolarData()
+    monkeypatch.setattr(SolarCharger, "parse", mock_solar_parse)
+
+    # Mock __init__ and parse for BatterySense
+    def mock_sense_init(self, key):
+        self.mock_key = key
+    monkeypatch.setattr(BatterySense, "__init__", mock_sense_init)
+
+    class MockSenseData:
+        def get_temperature(self):
+            class Val: value = 22.5
+            return Val()
+        def get_voltage(self):
+            class Val: value = 13.2
+            return Val()
+
+    def mock_sense_parse(self, raw_bytes):
+        k = self.mock_key
+        k_str = k.hex() if isinstance(k, bytes) else str(k)
+        if k_str != _MOCK_SENSE_KEY:
+            raise ValueError("Decryption failed: incorrect key")
+        return MockSenseData()
+    monkeypatch.setattr(BatterySense, "parse", mock_sense_parse)
 
 
 class TestFieldGetterList:

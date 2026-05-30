@@ -58,7 +58,7 @@ MOCK_DEVICES = {
     "bridge_online": True,
     "devices": [
         {"id": "mppt_1", "label": "MPPT South",   "last_seen": "2026-05-07T12:00:00+00:00", "online": True},
-        {"id": "mppt_2", "label": "MPPT East",   "last_seen": "2026-05-07T12:00:00+00:00", "online": True},
+        {"id": "mppt_2", "label": "MPPT East",    "last_seen": "2026-05-07T12:00:00+00:00", "online": True},
         {"id": "battery_sense","label": "Battery Sense",  "last_seen": "2026-05-07T12:00:00+00:00", "online": True},
     ],
 }
@@ -485,7 +485,7 @@ class TestOfflineDevice:
         devices_with_offline = dict(MOCK_DEVICES)
         devices_with_offline["devices"] = [
             {"id": "mppt_1", "label": "MPPT South",  "last_seen": "2026-05-07T12:00:00+00:00", "online": False},
-            {"id": "mppt_2", "label": "MPPT East",  "last_seen": "2026-05-07T12:00:00+00:00", "online": True},
+            {"id": "mppt_2", "label": "MPPT East",   "last_seen": "2026-05-07T12:00:00+00:00", "online": True},
             {"id": "battery_sense","label": "Battery Sense", "last_seen": "2026-05-07T12:00:00+00:00", "online": True},
         ]
         _setup_mocks(page, devices=devices_with_offline)

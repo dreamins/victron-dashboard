@@ -312,6 +312,83 @@ LiTime BMS → ble-bridge (bleak active poll) → InfluxDB `battery` measurement
 
 ---
 
+## Testing
+
+All test scripts run on the Linux server (`user@192.168.1.x`). They use Docker — no host Python env needed.
+
+### Phase test scripts (run on Linux server)
+```bash
+bash test_phase8.sh              # ble-bridge unit + integration (16+4 tests)
+bash test_phase10.sh             # multi-site API, isolated InfluxDB (49 tests)
+bash test_phase11.sh             # dashboard UI checks against running stack
+bash test_phase12.sh             # device mgmt + setup wizard acceptance
+SKIP_SCAN=true bash test_phase12.sh   # skip the 30s BLE hardware scan
+```
+
+### Run a single test file
+```bash
+# ble-bridge unit tests — no InfluxDB needed
+docker compose run --rm --no-deps \
+  -e INFLUX_URL=http://dummy -e INFLUX_TOKEN=dummy -e INFLUX_BUCKET=dummy \
+  ble-bridge python -m pytest /app/tests/test_decoder.py -v
+
+# Single test by name pattern
+docker compose run --rm --no-deps \
+  -e INFLUX_URL=http://dummy -e INFLUX_TOKEN=dummy -e INFLUX_BUCKET=dummy \
+  ble-bridge python -m pytest /app/tests/test_decoder.py -v -k test_decode_mppt
+
+# API unit tests inside running container (mock query_api — no InfluxDB)
+docker exec victron-solar-api-1 python -m pytest tests/test_repository.py tests/test_device_mgmt.py -v
+
+# Full API test suite (requires isolated InfluxDB via docker-compose.api-test.yml)
+docker compose -f docker-compose.api-test.yml exec solar-api python -m pytest /app/tests/test_api.py -v
+```
+
+### UI tests (Playwright)
+`api/tests/test_ui.py` uses `pytest-playwright`. The `static_server` fixture in `conftest.py` spins up a local HTTP server serving `api/static/` — no running stack needed.
+```bash
+docker exec victron-solar-api-1 python -m pytest tests/test_ui.py -v
+```
+
+---
+
+## Deployment
+
+`scp` to the Linux host copies to `~/victron-dashboard/` but the running container serves its own baked-in copy. Always use the two-step pattern: `scp` then `docker cp`.
+
+### Dashboard (`api/static/index.html`)
+```bash
+scp api/static/index.html user@192.168.1.x:~/victron-dashboard/api/static/index.html
+ssh user@192.168.1.x "docker cp ~/victron-dashboard/api/static/index.html victron-solar-api-1:/app/static/index.html"
+```
+No restart needed. Browser hard-refresh (Ctrl+Shift+R) required after.
+
+### API Python files (`main.py`, `repository.py`, `config.py`, etc.)
+```bash
+scp api/main.py user@192.168.1.x:~/victron-dashboard/api/main.py
+ssh user@192.168.1.x "docker cp ~/victron-dashboard/api/main.py victron-solar-api-1:/app/main.py && docker restart victron-solar-api-1"
+```
+
+### ble-bridge Python files
+```bash
+scp ble-bridge/ble_bridge.py user@192.168.1.x:~/victron-dashboard/ble-bridge/ble_bridge.py
+ssh user@192.168.1.x "docker cp ~/victron-dashboard/ble-bridge/ble_bridge.py victron-ble-bridge-1:/app/ble_bridge.py && docker restart victron-ble-bridge-1"
+```
+After ble-bridge restart, if the scanner hangs on `NotReady`: `sudo hciconfig hci1 reset && sudo hciconfig hci1 up`, then wait ~15s.
+
+### Verify deployment
+```bash
+ssh user@192.168.1.x "docker exec victron-solar-api-1 grep -c 'keyword' /app/static/index.html"
+ssh user@192.168.1.x "docker exec victron-ble-bridge-1 grep -c 'keyword' /app/ble_bridge.py"
+```
+
+### Full rebuild (Dockerfile changed)
+```bash
+ssh user@192.168.1.x "cd ~/victron-dashboard && docker compose build solar-api && docker compose up -d solar-api"
+```
+
+---
+
 ## Working Style
 
 **Never declare a phase complete unless every acceptance criterion in `multi-site-design.md` §8 is met** — including real-hardware steps where specified.
@@ -367,3 +444,5 @@ LiTime BMS → ble-bridge (bleak active poll) → InfluxDB `battery` measurement
 **`((N++))` in bash with `set -e`** returns exit code 1 when N=0. Use `N=$((N+1))`.
 
 **Phase 3 decoder test format:** `{"mac": "...", "raw": {field: value}}` — pre-decoded, no decryption. Different from production `{"mac": "...", "data": "hexbytes"}` format.
+
+**Offline detection thresholds** (`api/repository.py`): `ONLINE_S=90` (device), `BRIDGE_S=120` (bridge). When device data is stale but `BRIDGE_S` has not elapsed, `get_bridge_alive()` is called to check the `ble_bridge_alive` InfluxDB measurement (heartbeat written every 30s by `run_heartbeat()` in `ble_bridge.py`). ESP32/home has no heartbeat — bridge_online is derived solely from device write recency.
