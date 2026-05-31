@@ -120,4 +120,4 @@ Four InfluxDB buckets: `victron` (30 d raw), `victron_medium` (1 yr × 5 min), `
 
 ## License
 
-MIT
+This is free and unencumbered software released into the public domain. See [UNLICENSE](UNLICENSE) for details.
