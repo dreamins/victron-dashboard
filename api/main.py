@@ -74,7 +74,16 @@ def sites():
 
 @app.get("/api/v1/devices")
 def devices(site: Optional[str] = Query(default=None)):
-    return repo.get_devices(site=site)
+    result = repo.get_devices(site=site)
+    type_map = {}
+    for s in load_sites_raw(SITES_FILE).get("sites", []):
+        if site and s["id"] != site:
+            continue
+        for d in s.get("devices", []):
+            type_map[d["id"]] = d.get("type", "unknown")
+    for d in result.get("devices", []):
+        d["type"] = type_map.get(d["id"], "unknown")
+    return result
 
 
 @app.get("/api/v1/current")

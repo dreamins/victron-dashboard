@@ -33,6 +33,14 @@ def test_devices_structure():
         assert "label" in dev
         assert "online" in dev
         assert "last_seen" in dev
+        assert "type" in dev
+
+
+def test_devices_include_type_from_sites_json():
+    r = get("/api/v1/devices")
+    by_id = {d["id"]: d for d in r.json()["devices"]}
+    assert by_id["test_mppt1"]["type"] == "victron_mppt"
+    assert by_id["test_battery_sense"]["type"] == "victron_battery_sense"
 
 
 def test_devices_known_devices_present():
@@ -44,13 +52,13 @@ def test_devices_known_devices_present():
 
 
 def test_devices_bridge_offline():
-    # Seed data ends 150s ago; BRIDGE threshold is 120s → must be offline
+    # Seed data ends 200s ago; BRIDGE threshold is 120s → must be offline
     r = get("/api/v1/devices")
     assert r.json()["bridge_online"] is False
 
 
 def test_devices_all_offline():
-    # Seed data ends 150s ago; ONLINE threshold is 90s → all devices offline
+    # Seed data ends 200s ago; ONLINE threshold is 90s → all devices offline
     r = get("/api/v1/devices")
     for dev in r.json()["devices"]:
         assert dev["online"] is False, f"{dev['id']} should be offline"

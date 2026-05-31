@@ -816,11 +816,14 @@ async function poll(){
       );
       S.bsense=bsDevice?bsDevice.id:null;
 
-      // AC chargers: have charge_state but no pv_power — not solar MPPTs
+      // AC chargers: explicit type wins; fall back to field inference for
+      // devices that predate the type field (charge_state present, pv_power absent).
       const chargerIds=new Set();
       for(const d of S.devices){
+        if(bmsIds.has(d.id)) continue;
+        if(d.type==='victron_ac_charger'){chargerIds.add(d.id);continue;}
         const f=S.current[d.id]?.fields||{};
-        if('charge_state' in f && !('pv_power' in f) && !bmsIds.has(d.id)) chargerIds.add(d.id);
+        if('charge_state' in f && !('pv_power' in f)) chargerIds.add(d.id);
       }
       S.chargers=[...chargerIds].sort();
 

@@ -34,6 +34,13 @@
           "key": "ccddeeff00112233445566778899aabb"
         },
         {
+          "id": "test_ip22",
+          "label": "IP22 Charger",
+          "type": "victron_ac_charger",
+          "mac": "AA:BB:CC:DD:EE:05",
+          "key": "ddeeff00112233445566778899aabbcc"
+        },
+        {
           "id": "test_bms",
           "label": "Test LiTime",
           "type": "litime_bms",

@@ -94,6 +94,7 @@ from(bucket: "{self._bucket}")
   |> range(start: -30d)
   |> filter(fn: (r) => r._measurement == "solar")
   {site_filter(site)}
+  |> filter(fn: (r) => r._field == "battery_voltage")
   |> group(columns: ["device", "label"])
   |> last()
   |> keep(columns: ["_time", "device", "label"])

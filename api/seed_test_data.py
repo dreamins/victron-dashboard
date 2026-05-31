@@ -63,8 +63,9 @@ def main():
     write_api = client.write_api(write_options=SYNCHRONOUS)
 
     now = datetime.now(timezone.utc)
-    # End 150s ago so online/bridge_online show False in tests (thresholds: 90s, 120s)
-    end_time = now - timedelta(seconds=150)
+    # End 200s ago so online/bridge_online show False in tests (thresholds: 90s, 120s).
+    # 200s gives an 80s buffer vs BRIDGE_S=120 and a 110s buffer vs ONLINE_S=90.
+    end_time = now - timedelta(seconds=200)
     start_time = end_time - timedelta(hours=args.hours)
     step = timedelta(minutes=args.interval_minutes)
 
