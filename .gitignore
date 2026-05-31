@@ -1,5 +1,4 @@
 esp32/secrets.yaml
-.claude/settings.local.json
 esp32/.esphome/
 esp32/build/
 config/devices.json
@@ -18,3 +17,9 @@ venv/
 docs/take_screenshots.py
 .server
 backups/
+
+# AI assistant context files (local only)
+CLAUDE.md
+GEMINI.md
+PHASE7_STATE.md
+.claude/
