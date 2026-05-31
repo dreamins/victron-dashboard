@@ -341,31 +341,51 @@ class BridgeController:
         2. Task alive but Discovering=false — scanner.start() succeeded but
            BlueZ silently dropped the scan (e.g. timed-out BMS connect called
            _scanner_stop/_scanner_start and the start timed out mid-D-Bus).
+
+        Recovery ladder for persistent NotReady (e.g. power glitch corrupted
+        adapter firmware state):
+          5 consecutive exits  → power-cycle BT adapter via D-Bus
+          10 consecutive exits → SIGTERM so Docker restarts the container
         """
-        _check_count = 0
+        _check_count  = 0
+        _consec_fails = 0
         while True:
             await asyncio.sleep(30.0)
             _check_count += 1
             t = self._scanner_task
             if t is None or t.done():
                 exc = (t.exception() if (t is not None and not t.cancelled()) else None)
-                log.error("Scanner task exited (exc=%s) — restarting in 10s", exc)
+                _consec_fails += 1
+                log.error("Scanner task exited (exc=%s) — restarting in 10s [fail #%d]",
+                          exc, _consec_fails)
+                if _consec_fails == 5:
+                    log.error("Scanner failed %d times consecutively — power-cycling BT adapter",
+                              _consec_fails)
+                    await _force_stop_discovery(power_cycle=True)
+                elif _consec_fails >= 10:
+                    log.error("Scanner failed %d times — sending SIGTERM for Docker restart",
+                              _consec_fails)
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    await asyncio.sleep(15)
+                    sys.exit(1)
                 await asyncio.sleep(10.0)
                 victron = self._victron_subset(self.device_map)
                 self._scanner_task = asyncio.create_task(
                     run_ble_scanner(victron, self.writer))
                 log.info("Scanner task restarted by watchdog")
                 _check_count = 0
-            elif _check_count >= 4:  # every 2 minutes
-                _check_count = 0
-                if not await _is_discovering():
-                    log.warning("BlueZ Discovering=false while scanner task is alive — restarting")
-                    t.cancel()
-                    try:
-                        await asyncio.wait_for(t, timeout=5.0)
-                    except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
-                        pass
-                    # watchdog will restart it on the next iteration
+            else:
+                _consec_fails = 0
+                if _check_count >= 4:  # every 2 minutes
+                    _check_count = 0
+                    if not await _is_discovering():
+                        log.warning("BlueZ Discovering=false while scanner task is alive — restarting")
+                        t.cancel()
+                        try:
+                            await asyncio.wait_for(t, timeout=5.0)
+                        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                            pass
+                        # watchdog will restart it on the next iteration
 
     async def reload(self) -> None:
         """Re-read sites.json and diff-apply changes without restarting."""

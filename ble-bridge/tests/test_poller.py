@@ -1,4 +1,4 @@
-"""Tests for run_bms_poller in ble_bridge.py — all BLE interactions mocked.
+"""Tests for run_bms_poller and BridgeController._scanner_watchdog in ble_bridge.py.
 
 Runs with standard pytest (no pytest-asyncio needed) by calling asyncio.run()
 directly in each test function.
@@ -9,6 +9,9 @@ Covers:
     (old code had `continue` that caused infinite busy-spin with no sleep or connect)
   - Backoff increments on connection failure
   - Backoff resets on successful connect
+  - Scanner watchdog power-cycles BT adapter after 5 consecutive failures
+  - Scanner watchdog sends SIGTERM after 10 consecutive failures
+  - Scanner watchdog resets failure counter when scanner runs successfully
 """
 import asyncio
 import os
@@ -21,7 +24,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import ble_bridge
-from ble_bridge import run_bms_poller, _bt_watchdog_thread
+from ble_bridge import run_bms_poller, _bt_watchdog_thread, BridgeController
 
 
 BMS_INFO = {
@@ -365,6 +368,113 @@ def test_poller_connect_timeout_triggers_retry():
     _run(_go())
     assert bms.connect_calls == 2, "Poller should retry after TimeoutError"
     assert 5 in sleep_calls, f"Expected 5s backoff after timeout, got: {sleep_calls}"
+
+
+# ── Scanner watchdog recovery ladder ─────────────────────────────────────────
+
+def test_watchdog_power_cycles_at_5_and_sigterms_at_10():
+    """After 5 consecutive scanner exits, watchdog power-cycles the adapter.
+    After 10, it sends SIGTERM to let Docker restart the container.
+
+    Regression: before this fix the watchdog restarted forever with no
+    escalation, leaving the BMS offline indefinitely after a power glitch
+    that corrupted the Realtek BT adapter firmware state.
+    """
+    _reset()
+    real_sleep = asyncio.sleep  # save before patching
+
+    async def _go():
+        writer = _MockWriter()
+        ctrl   = BridgeController({}, writer)
+
+        power_cycled = []
+        sigtermed    = []
+
+        async def _fast_sleep(t):
+            await real_sleep(0)  # yield to event loop without waiting
+
+        async def _failing_impl(*a, **kw):
+            raise OSError("org.bluez.Error.NotReady")
+
+        async def _mock_fsd(power_cycle=False):
+            if power_cycle:
+                power_cycled.append(True)
+
+        def _mock_kill(pid, sig):
+            sigtermed.append(sig)
+            raise SystemExit(0)  # stop the watchdog loop
+
+        # Start with an already-failing scanner task
+        ctrl._scanner_task = asyncio.create_task(_failing_impl())
+
+        # run_ble_scanner is async def so patch auto-creates AsyncMock.
+        # side_effect on AsyncMock is called when the coroutine is awaited,
+        # so setting it to an async function that raises works correctly.
+        with patch("asyncio.sleep", side_effect=_fast_sleep), \
+             patch("ble_bridge._force_stop_discovery", side_effect=_mock_fsd), \
+             patch("ble_bridge.run_ble_scanner", new=AsyncMock(side_effect=_failing_impl)), \
+             patch("os.kill", side_effect=_mock_kill), \
+             patch("sys.exit"):
+            try:
+                await ctrl._scanner_watchdog()
+            except SystemExit:
+                pass
+
+        assert len(power_cycled) == 1, (
+            f"Expected exactly one power-cycle at fail #5, got {len(power_cycled)}"
+        )
+        assert len(sigtermed) >= 1, (
+            f"Expected SIGTERM at fail #10, got {len(sigtermed)}"
+        )
+
+    asyncio.run(_go())
+
+
+def test_watchdog_no_power_cycle_when_scanner_healthy():
+    """Counter stays 0 (never reaches 5) when the scanner runs without exiting.
+
+    This verifies the else-branch reset: _consec_fails = 0 fires every
+    watchdog cycle where t.done() is False, preventing false escalation.
+    """
+    _reset()
+    real_sleep = asyncio.sleep
+
+    async def _go():
+        writer       = _MockWriter()
+        ctrl         = BridgeController({}, writer)
+        power_cycled = []
+        cycles       = [0]
+
+        async def _fast_sleep(t):
+            cycles[0] += 1
+            if cycles[0] >= 20:  # 20 watchdog cycles is well past the threshold
+                raise SystemExit(0)
+            await real_sleep(0)
+
+        async def _healthy_impl(*a, **kw):
+            await real_sleep(3600)  # stays alive; cancelled on asyncio.run() teardown
+
+        async def _mock_fsd(power_cycle=False):
+            if power_cycle:
+                power_cycled.append(True)
+
+        ctrl._scanner_task = asyncio.create_task(_healthy_impl())
+
+        with patch("asyncio.sleep", side_effect=_fast_sleep), \
+             patch("ble_bridge._force_stop_discovery", side_effect=_mock_fsd), \
+             patch("ble_bridge.run_ble_scanner", new=AsyncMock(side_effect=_healthy_impl)), \
+             patch("os.kill"), \
+             patch("sys.exit"):
+            try:
+                await ctrl._scanner_watchdog()
+            except SystemExit:
+                pass
+
+        assert len(power_cycled) == 0, (
+            f"Healthy scanner triggered unexpected power-cycle after {cycles[0]} cycles"
+        )
+
+    asyncio.run(_go())
 
 
 # ── Disconnect exception regression ──────────────────────────────────────────
