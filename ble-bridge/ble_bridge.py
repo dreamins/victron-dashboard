@@ -144,6 +144,37 @@ async def _wait_for_bms_in_scan(mac: str, timeout: float = 300.0) -> bool:
         _bms_seen_events.pop(mac, None)
 
 
+async def _restart_bluetooth_service() -> bool:
+    """Ask systemd to restart bluetooth.service via the system D-Bus.
+
+    Works in a privileged container that has /var/run/dbus mounted.
+    Reloads the BlueZ daemon and reinitialises the adapter — fixes firmware
+    corruption that survives hciconfig reset and Powered=false/true cycling.
+    Falls back to Powered power-cycle if the systemd call fails.
+    Returns True if the systemd call succeeded.
+    """
+    try:
+        from dbus_fast.aio import MessageBus
+        from dbus_fast import BusType
+        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        try:
+            introspection = await bus.introspect(
+                "org.freedesktop.systemd1", "/org/freedesktop/systemd1")
+            proxy = bus.get_proxy_object(
+                "org.freedesktop.systemd1", "/org/freedesktop/systemd1", introspection)
+            iface = proxy.get_interface("org.freedesktop.systemd1.Manager")
+            await iface.call_restart_unit("bluetooth.service", "replace")
+            log.info("bluetooth.service restart requested via systemd D-Bus")
+            return True
+        finally:
+            bus.disconnect()
+    except Exception as exc:
+        log.warning("bluetooth.service D-Bus restart failed: %s — falling back to adapter power-cycle",
+                    exc)
+        await _force_stop_discovery(power_cycle=True)
+        return False
+
+
 async def _force_stop_discovery(power_cycle: bool = False) -> None:
     """Clear any leftover BlueZ scan session so scanner.start() can succeed.
 
@@ -344,8 +375,11 @@ class BridgeController:
 
         Recovery ladder for persistent NotReady (e.g. power glitch corrupted
         adapter firmware state):
-          5 consecutive exits  → power-cycle BT adapter via D-Bus
-          10 consecutive exits → SIGTERM so Docker restarts the container
+          5 consecutive exits  → restart bluetooth.service via systemd D-Bus
+                                  then SIGTERM so Docker restarts the container
+                                  with a fresh BlueZ connection
+          10 consecutive exits → backup SIGTERM (in case Docker restart loop
+                                  keeps hitting a still-broken adapter)
         """
         _check_count  = 0
         _consec_fails = 0
@@ -359,9 +393,14 @@ class BridgeController:
                 log.error("Scanner task exited (exc=%s) — restarting in 10s [fail #%d]",
                           exc, _consec_fails)
                 if _consec_fails == 5:
-                    log.error("Scanner failed %d times consecutively — power-cycling BT adapter",
+                    log.error("Scanner failed %d times — restarting bluetooth.service and exiting",
                               _consec_fails)
-                    await _force_stop_discovery(power_cycle=True)
+                    await _restart_bluetooth_service()
+                    await asyncio.sleep(5.0)  # let bluetoothd reinitialise
+                    log.error("Sending SIGTERM — Docker will restart with fresh BlueZ connection")
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    await asyncio.sleep(15)
+                    sys.exit(1)
                 elif _consec_fails >= 10:
                     log.error("Scanner failed %d times — sending SIGTERM for Docker restart",
                               _consec_fails)

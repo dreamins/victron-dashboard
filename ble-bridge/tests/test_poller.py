@@ -372,13 +372,14 @@ def test_poller_connect_timeout_triggers_retry():
 
 # ── Scanner watchdog recovery ladder ─────────────────────────────────────────
 
-def test_watchdog_power_cycles_at_5_and_sigterms_at_10():
-    """After 5 consecutive scanner exits, watchdog power-cycles the adapter.
-    After 10, it sends SIGTERM to let Docker restart the container.
+def test_watchdog_restarts_bluetooth_and_sigterms_at_5():
+    """After 5 consecutive scanner exits, watchdog restarts bluetooth.service
+    via systemd D-Bus then sends SIGTERM so Docker restarts the container.
 
-    Regression: before this fix the watchdog restarted forever with no
-    escalation, leaving the BMS offline indefinitely after a power glitch
-    that corrupted the Realtek BT adapter firmware state.
+    Regression: the original fix only power-cycled the adapter (Powered=false/
+    true) which does not reload Realtek USB firmware after a power glitch.
+    The correct fix is to restart the BlueZ daemon and then let Docker restart
+    the container with a fresh D-Bus connection.
     """
     _reset()
     real_sleep = asyncio.sleep  # save before patching
@@ -387,7 +388,7 @@ def test_watchdog_power_cycles_at_5_and_sigterms_at_10():
         writer = _MockWriter()
         ctrl   = BridgeController({}, writer)
 
-        power_cycled = []
+        bt_restarted = []
         sigtermed    = []
 
         async def _fast_sleep(t):
@@ -396,9 +397,9 @@ def test_watchdog_power_cycles_at_5_and_sigterms_at_10():
         async def _failing_impl(*a, **kw):
             raise OSError("org.bluez.Error.NotReady")
 
-        async def _mock_fsd(power_cycle=False):
-            if power_cycle:
-                power_cycled.append(True)
+        async def _mock_restart_bt():
+            bt_restarted.append(True)
+            return True
 
         def _mock_kill(pid, sig):
             sigtermed.append(sig)
@@ -411,7 +412,7 @@ def test_watchdog_power_cycles_at_5_and_sigterms_at_10():
         # side_effect on AsyncMock is called when the coroutine is awaited,
         # so setting it to an async function that raises works correctly.
         with patch("asyncio.sleep", side_effect=_fast_sleep), \
-             patch("ble_bridge._force_stop_discovery", side_effect=_mock_fsd), \
+             patch("ble_bridge._restart_bluetooth_service", side_effect=_mock_restart_bt), \
              patch("ble_bridge.run_ble_scanner", new=AsyncMock(side_effect=_failing_impl)), \
              patch("os.kill", side_effect=_mock_kill), \
              patch("sys.exit"):
@@ -420,11 +421,11 @@ def test_watchdog_power_cycles_at_5_and_sigterms_at_10():
             except SystemExit:
                 pass
 
-        assert len(power_cycled) == 1, (
-            f"Expected exactly one power-cycle at fail #5, got {len(power_cycled)}"
+        assert len(bt_restarted) == 1, (
+            f"Expected exactly one bluetooth restart at fail #5, got {len(bt_restarted)}"
         )
         assert len(sigtermed) >= 1, (
-            f"Expected SIGTERM at fail #10, got {len(sigtermed)}"
+            f"Expected SIGTERM at fail #5, got {len(sigtermed)}"
         )
 
     asyncio.run(_go())
