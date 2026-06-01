@@ -65,6 +65,12 @@ _bms_seen_events: Dict[str, asyncio.Event] = {}
 # Populated by run_ble_scanner callback; read by scan_victron() without stopping the scanner.
 _victron_seen_cache: Dict[str, Dict] = {}
 
+# Monotonic timestamp of the last BLE advertisement received by the scanner callback.
+# Updated for every advertisement (not just Victron) so the watchdog can detect a
+# "deaf" adapter — one that is technically running but receiving nothing.
+_last_adv_time: float = 0.0
+_ADV_SILENCE_S = 90.0  # adapter considered deaf after this many seconds with no advertisements
+
 # device_id → monotonic timestamp of last BMS poller activity (set inside the loop body).
 # Read by the thread watchdog — survives a frozen asyncio event loop.
 _poller_heartbeat: Dict[str, float] = {}
@@ -415,7 +421,17 @@ class BridgeController:
                 _check_count = 0
             else:
                 _consec_fails = 0
-                if _check_count >= 4:  # every 2 minutes
+                silence_s = time.monotonic() - _last_adv_time
+                if silence_s > _ADV_SILENCE_S:
+                    log.error("Scanner alive but no BLE advertisements in %.0fs — "
+                              "adapter deaf, restarting bluetooth.service and exiting",
+                              silence_s)
+                    await _restart_bluetooth_service()
+                    await asyncio.sleep(5.0)
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    await asyncio.sleep(15)
+                    sys.exit(1)
+                elif _check_count >= 4:  # every 2 minutes
                     _check_count = 0
                     if not await _is_discovering():
                         log.warning("BlueZ Discovering=false while scanner task is alive — restarting")
@@ -581,6 +597,8 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter,
     seen: Dict[str, int] = {}
 
     def _callback(device, adv_data):
+        global _last_adv_time
+        _last_adv_time = time.monotonic()  # any advertisement proves the adapter is receiving
         mac = device.address.upper()
         if mac in _bms_seen_events:
             _bms_seen_events[mac].set()
@@ -617,6 +635,9 @@ async def run_ble_scanner(device_map: Dict[str, Dict], writer: InfluxWriter,
             if n == 1 or n % 10 == 0:
                 log.info("[%s/%s] %d points (interval=%ds)",
                          info["site_id"], info["device_id"], n, interval)
+
+    global _last_adv_time
+    _last_adv_time = time.monotonic()  # reset silence clock for this scanner session
 
     log.info("BLE scan started — %d Victron device(s) (adapter=%s)",
              len(device_map), BLE_ADAPTER or "default")

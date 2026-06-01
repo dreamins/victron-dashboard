@@ -94,6 +94,7 @@ def _reset():
     ble_bridge._bms_seen_events.clear()
     ble_bridge._last_written.clear()
     ble_bridge._poller_heartbeat.clear()
+    ble_bridge._last_adv_time = time.monotonic()  # prevent silence detector from firing
 
 
 def _run(coro):
@@ -436,6 +437,7 @@ def test_watchdog_no_power_cycle_when_scanner_healthy():
 
     This verifies the else-branch reset: _consec_fails = 0 fires every
     watchdog cycle where t.done() is False, preventing false escalation.
+    Also verifies no deaf-adapter escalation when advertisements are recent.
     """
     _reset()
     real_sleep = asyncio.sleep
@@ -460,10 +462,13 @@ def test_watchdog_no_power_cycle_when_scanner_healthy():
                 power_cycled.append(True)
 
         ctrl._scanner_task = asyncio.create_task(_healthy_impl())
+        # Simulate recent advertisements so silence detector does not fire
+        ble_bridge._last_adv_time = time.monotonic()
 
         with patch("asyncio.sleep", side_effect=_fast_sleep), \
              patch("ble_bridge._force_stop_discovery", side_effect=_mock_fsd), \
              patch("ble_bridge.run_ble_scanner", new=AsyncMock(side_effect=_healthy_impl)), \
+             patch("ble_bridge._restart_bluetooth_service", new=AsyncMock()), \
              patch("os.kill"), \
              patch("sys.exit"):
             try:
@@ -474,6 +479,56 @@ def test_watchdog_no_power_cycle_when_scanner_healthy():
         assert len(power_cycled) == 0, (
             f"Healthy scanner triggered unexpected power-cycle after {cycles[0]} cycles"
         )
+
+    asyncio.run(_go())
+
+
+def test_watchdog_escalates_on_deaf_adapter():
+    """Watchdog restarts bluetooth and exits when scanner is alive but silent >90s.
+
+    Regression: 'adapter deaf' failure — BlueZ reports Discovering=true but
+    zero BLE advertisements arrive (firmware state corrupted after power glitch).
+    The scanner task stays alive so the NotReady escalation ladder never fires.
+    """
+    _reset()
+    real_sleep = asyncio.sleep
+
+    async def _go():
+        writer       = _MockWriter()
+        ctrl         = BridgeController({}, writer)
+        bt_restarted = []
+        sigtermed    = []
+
+        async def _fast_sleep(t):
+            await real_sleep(0)
+
+        async def _healthy_impl(*a, **kw):
+            await real_sleep(3600)
+
+        async def _mock_restart_bt():
+            bt_restarted.append(True)
+            return True
+
+        def _mock_kill(pid, sig):
+            sigtermed.append(sig)
+            raise SystemExit(0)
+
+        ctrl._scanner_task = asyncio.create_task(_healthy_impl())
+        # Simulate adapter that stopped delivering advertisements 120s ago
+        ble_bridge._last_adv_time = time.monotonic() - 120.0
+
+        with patch("asyncio.sleep", side_effect=_fast_sleep), \
+             patch("ble_bridge._restart_bluetooth_service", side_effect=_mock_restart_bt), \
+             patch("ble_bridge.run_ble_scanner", new=AsyncMock(side_effect=_healthy_impl)), \
+             patch("os.kill", side_effect=_mock_kill), \
+             patch("sys.exit"):
+            try:
+                await ctrl._scanner_watchdog()
+            except SystemExit:
+                pass
+
+        assert len(bt_restarted) == 1, "Expected bluetooth restart on deaf adapter"
+        assert len(sigtermed) >= 1, "Expected SIGTERM after deaf adapter detected"
 
     asyncio.run(_go())
 
@@ -631,6 +686,7 @@ def test_scanner_start_power_cycles_on_third_attempt():
 def test_scanner_watchdog_restarts_when_not_discovering():
     """BridgeController._scanner_watchdog cancels the scanner task when
     _is_discovering() returns False, allowing the watchdog to restart it."""
+    _reset()
     from ble_bridge import BridgeController
 
     async def _go():
