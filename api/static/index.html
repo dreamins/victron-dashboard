@@ -812,7 +812,7 @@ async function poll(){
       S.bmsDevice=[...bmsIds][0]||null;
 
       const bsDevice=S.devices.find(d=>
-        !bmsIds.has(d.id)&&(d.id.includes('sense')||d.label.toLowerCase().includes('sense'))
+        !bmsIds.has(d.id)&&(d.type==='victron_battery_sense'||d.id.includes('sense')||d.label.toLowerCase().includes('sense'))
       );
       S.bsense=bsDevice?bsDevice.id:null;
 
