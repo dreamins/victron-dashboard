@@ -15,7 +15,7 @@ from influxdb_client import InfluxDBClient
 from pydantic import BaseModel
 
 from config import (
-    VALID_FIELDS,
+    VALID_FIELDS, BMS_MEASUREMENT_TYPES,
     device_measurement, load_sites, load_sites_raw, write_sites_atomic,
 )
 from repository import InfluxRepository, ID_RE, auto_interval, parse_duration_s, valid_duration
@@ -76,13 +76,28 @@ def sites():
 def devices(site: Optional[str] = Query(default=None)):
     result = repo.get_devices(site=site)
     type_map = {}
+    existing_ids = {d["id"] for d in result.get("devices", [])}
     for s in load_sites_raw(SITES_FILE).get("sites", []):
         if site and s["id"] != site:
             continue
         for d in s.get("devices", []):
-            type_map[d["id"]] = d.get("type", "unknown")
+            dev_type = d.get("type", "unknown")
+            type_map[d["id"]] = dev_type
+            # Device is configured but has no recent InfluxDB data → inject as offline.
+            # Skip BMS types — they write to the 'battery' measurement, not 'solar'.
+            if d["id"] not in existing_ids and dev_type not in BMS_MEASUREMENT_TYPES:
+                result["devices"].append({
+                    "id":        d["id"],
+                    "label":     d.get("label", d["id"]),
+                    "last_seen": None,
+                    "online":    False,
+                    "type":      dev_type,
+                })
+                existing_ids.add(d["id"])
     for d in result.get("devices", []):
-        d["type"] = type_map.get(d["id"], "unknown")
+        if "type" not in d:
+            d["type"] = type_map.get(d["id"], "unknown")
+    result["devices"] = sorted(result["devices"], key=lambda d: d["id"])
     return result
 
 

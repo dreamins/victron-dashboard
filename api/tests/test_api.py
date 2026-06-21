@@ -64,6 +64,25 @@ def test_devices_all_offline():
         assert dev["online"] is False, f"{dev['id']} should be offline"
 
 
+def test_devices_configured_but_unseeded_appears_offline():
+    # test_ip22 is in sites_fixture.json but has no seed data.
+    # It must still appear in the device list so the flow SVG can render it.
+    r = get("/api/v1/devices", site="test")
+    by_id = {d["id"]: d for d in r.json()["devices"]}
+    assert "test_ip22" in by_id, "configured device with no InfluxDB data must appear"
+    assert by_id["test_ip22"]["online"] is False
+    assert by_id["test_ip22"]["type"] == "victron_ac_charger"
+    assert by_id["test_ip22"]["last_seen"] is None
+
+
+def test_devices_bms_type_not_injected():
+    # litime_bms devices write to 'battery' measurement, not 'solar'.
+    # They must NOT appear in the solar device list regardless of InfluxDB data.
+    r = get("/api/v1/devices", site="test")
+    ids = {d["id"] for d in r.json()["devices"]}
+    assert "test_bms" not in ids
+
+
 # ─── /current ─────────────────────────────────────────────────────────────────
 
 def test_current_returns_200():
